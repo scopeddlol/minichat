@@ -143,6 +143,25 @@ pub async fn update_instance(
     Ok(Json(json!(instance)))
 }
 
+/// Run the orphaned-upload sweep on demand rather than waiting for the hourly
+/// timer. Handy when an operator wants the disk back now.
+pub async fn sweep_uploads(State(state): State<AppState>, auth: Auth) -> AppResult<Json<Value>> {
+    auth.require(perms::MANAGE_INSTANCE)?;
+    let removed = crate::sweeper::sweep(&state)
+        .await
+        .map_err(AppError::Internal)?;
+    access::audit(
+        &state,
+        Some(auth.id()),
+        "instance.sweep_uploads",
+        "instance",
+        "1",
+        &format!("Removed {removed} orphaned upload(s)"),
+    )
+    .await;
+    Ok(Json(json!({ "removed": removed })))
+}
+
 pub async fn stats(State(state): State<AppState>, auth: Auth) -> AppResult<Json<Value>> {
     auth.require(perms::MANAGE_INSTANCE)?;
 

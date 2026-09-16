@@ -33,6 +33,7 @@ export default function Sidebar({
   const activeChannelId = useStore((s) => s.activeChannelId)
   const setActiveChannel = useStore((s) => s.setActiveChannel)
   const unread = useStore((s) => s.unread)
+  const mentionCounts = useStore((s) => s.mentionCounts)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
   const grouped = useMemo(() => {
@@ -127,6 +128,7 @@ export default function Sidebar({
             channels={grouped.uncategorised}
             activeChannelId={activeChannelId}
             unread={unread}
+            mentionCounts={mentionCounts}
             onSelect={select}
             onOpenProfile={onOpenProfile}
           />
@@ -162,6 +164,7 @@ export default function Sidebar({
                   channels={list}
                   activeChannelId={activeChannelId}
                   unread={unread}
+                  mentionCounts={mentionCounts}
                   onSelect={select}
                   onOpenProfile={onOpenProfile}
                 />
@@ -203,12 +206,14 @@ function ChannelGroup({
   channels,
   activeChannelId,
   unread,
+  mentionCounts,
   onSelect,
   onOpenProfile,
 }: {
   channels: Channel[]
   activeChannelId: string | null
   unread: Record<string, number>
+  mentionCounts: Record<string, number>
   onSelect: (channel: Channel) => void
   onOpenProfile: (userId: string) => void
 }) {
@@ -220,6 +225,7 @@ function ChannelGroup({
       {channels.map((channel) => {
         const active = activeChannelId === channel.id
         const count = unread[channel.id] ?? 0
+        const mentions = mentionCounts[channel.id] ?? 0
         const occupants = Object.values(voiceStates).filter((vs) => vs.channel_id === channel.id)
 
         return (
@@ -247,14 +253,24 @@ function ChannelGroup({
                   {channel.user_limit > 0 ? `/${channel.user_limit}` : ''}
                 </span>
               )}
-              {count > 0 && channel.kind !== 'voice' && (
+              {/* A mention badge outranks a plain unread count — being named
+                  is a different signal from a busy channel. */}
+              {mentions > 0 && channel.kind !== 'voice' ? (
+                <span
+                  className="text-[0.66rem] font-bold px-1.5 rounded-full tabular-nums shrink-0"
+                  style={{ background: 'var(--danger)', color: '#fff', minWidth: 18, lineHeight: '17px' }}
+                  title={`${mentions} mention${mentions === 1 ? '' : 's'}`}
+                >
+                  @{mentions > 9 ? '9+' : mentions}
+                </span>
+              ) : count > 0 && channel.kind !== 'voice' ? (
                 <span
                   className="text-[0.66rem] font-bold px-1.5 rounded-full tabular-nums shrink-0"
                   style={{ background: 'var(--accent)', color: 'var(--accent-ink)', minWidth: 18, lineHeight: '17px' }}
                 >
                   {count > 99 ? '99+' : count}
                 </span>
-              )}
+              ) : null}
             </button>
 
             {/* Who's in this voice channel */}
@@ -313,8 +329,10 @@ export function ChannelIcon({ kind, isPrivate, size = 15 }: { kind: string; isPr
 
 /** Live voice controls, shown only while connected to a channel. */
 function VoiceDock() {
-  const { connected, connecting, channelId, muted, deafened, cameraOn, screenSharing, canVideo, canScreenShare, canSpeak } =
-    useVoice()
+  const {
+    connected, connecting, channelId, muted, deafened, cameraOn, screenSharing,
+    canVideo, canScreenShare, canSpeak, pushToTalkActive,
+  } = useVoice()
   const voice = useVoice()
   const channels = useStore((s) => s.channels)
   const channel = channels.find((c) => c.id === channelId)
@@ -336,7 +354,7 @@ function VoiceDock() {
             {connecting ? 'Connecting…' : 'Voice connected'}
           </p>
           <p className="text-[0.7rem] truncate" style={{ color: 'var(--text-faint)' }}>
-            {channel?.name ?? 'Voice channel'}
+            {pushToTalkActive ? 'Transmitting…' : (channel?.name ?? 'Voice channel')}
           </p>
         </div>
         <button
@@ -351,13 +369,14 @@ function VoiceDock() {
 
       <div className="grid grid-cols-4 gap-1.5">
         <VoiceButton
-          active={!muted}
+          active={!muted || pushToTalkActive}
           disabled={!canSpeak}
           onClick={() => void voice.toggleMute()}
           title={muted ? 'Unmute' : 'Mute'}
-          danger={muted}
+          danger={muted && !pushToTalkActive}
+          live={pushToTalkActive}
         >
-          {muted ? <MicOff size={15} /> : <Mic size={15} />}
+          {muted && !pushToTalkActive ? <MicOff size={15} /> : <Mic size={15} />}
         </VoiceButton>
         <VoiceButton
           active={!deafened}
@@ -393,6 +412,7 @@ function VoiceButton({
   active,
   danger,
   disabled,
+  live,
   onClick,
   title,
 }: {
@@ -400,6 +420,8 @@ function VoiceButton({
   active?: boolean
   danger?: boolean
   disabled?: boolean
+  /** Push-to-talk is currently open. */
+  live?: boolean
   onClick: () => void
   title: string
 }) {
@@ -409,14 +431,22 @@ function VoiceButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className="flex items-center justify-center py-1.5 rounded-lg transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
+      className={`flex items-center justify-center py-1.5 rounded-lg transition-colors disabled:opacity-35 disabled:cursor-not-allowed${live ? ' speaking-ring' : ''}`}
       style={{
-        background: danger
-          ? 'color-mix(in oklab, var(--danger) 18%, transparent)'
-          : active
-            ? 'var(--accent-soft)'
-            : 'var(--surface-2)',
-        color: danger ? 'var(--danger)' : active ? 'var(--accent)' : 'var(--text-muted)',
+        background: live
+          ? 'color-mix(in oklab, var(--success) 22%, transparent)'
+          : danger
+            ? 'color-mix(in oklab, var(--danger) 18%, transparent)'
+            : active
+              ? 'var(--accent-soft)'
+              : 'var(--surface-2)',
+        color: live
+          ? 'var(--success)'
+          : danger
+            ? 'var(--danger)'
+            : active
+              ? 'var(--accent)'
+              : 'var(--text-muted)',
       }}
     >
       {children}

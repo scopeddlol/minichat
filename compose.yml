@@ -43,6 +43,9 @@ services:
       LIVEKIT_URL: wss://${LIVEKIT_DOMAIN}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in .env}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in .env}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
       RUST_LOG: ${RUST_LOG:-minichat_server=info,tower_http=warn}
     volumes:
       - minichat_data:/data

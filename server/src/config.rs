@@ -14,6 +14,11 @@ pub struct Config {
     /// Optional shared secret required to run the first-run wizard. Set it when
     /// the instance is reachable before you get to it yourself.
     pub setup_token: String,
+    /// Web Push (VAPID) keypair. Without it, push notifications stay off and
+    /// the rest of the app works unchanged.
+    pub vapid_public_key: String,
+    pub vapid_private_key: String,
+    pub vapid_subject: String,
 }
 
 fn var_or(key: &str, default: &str) -> String {
@@ -52,6 +57,9 @@ impl Config {
             livekit_api_secret: var_or("LIVEKIT_API_SECRET", ""),
             web_dir: var_or("WEB_DIR", "./web"),
             setup_token: var_or("SETUP_TOKEN", ""),
+            vapid_public_key: var_or("VAPID_PUBLIC_KEY", ""),
+            vapid_private_key: var_or("VAPID_PRIVATE_KEY", ""),
+            vapid_subject: var_or("VAPID_SUBJECT", "mailto:admin@example.com"),
         }
     }
 
@@ -59,6 +67,10 @@ impl Config {
         !self.livekit_url.is_empty()
             && !self.livekit_api_key.is_empty()
             && !self.livekit_api_secret.is_empty()
+    }
+
+    pub fn push_ready(&self) -> bool {
+        !self.vapid_public_key.is_empty() && !self.vapid_private_key.is_empty()
     }
 
     pub fn uploads_dir(&self) -> String {

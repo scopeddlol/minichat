@@ -38,6 +38,9 @@ the SFU directly.
 | `access.rs` | Permission resolution, row hydration, audit writes |
 | `gateway.rs` | The WebSocket gateway |
 | `livekit.rs` | Access-token minting for voice and video |
+| `mentions.rs` | Parsing `@name` out of message bodies and storing the results |
+| `push.rs` | Web Push delivery, recipient resolution, VAPID key generation |
+| `sweeper.rs` | Hourly cleanup of uploads nothing references |
 | `routes/` | One module per API area |
 
 ### Authentication
@@ -109,6 +112,9 @@ with no secondary index or offset scan.
 | `lib/store.ts` | Zustand store; every gateway event is reduced here |
 | `lib/voice.ts` | LiveKit room lifecycle, tracks, devices, moderation |
 | `lib/markdown.tsx` | Markdown subset rendered to React nodes |
+| `lib/push.ts` | Push subscription lifecycle and platform quirks |
+| `lib/hotkeys.ts` | Push-to-talk, mute and deafen bindings |
+| `sw.ts` | Service worker: precaching, push display, notification clicks |
 | `routes/` | Setup wizard, auth, chat shell |
 | `components/admin/` | Admin panel tabs |
 
@@ -122,6 +128,33 @@ Permission bits are handled as `BigInt` — `ADMINISTRATOR` is `1 << 30` and the
 flag space runs past what a JSON number can carry safely, so the API sends them
 as strings.
 
+## Notifications
+
+Mentions are stored as rows rather than re-scanned from message text, so
+"unread mentions in this channel" is one indexed query. `@everyone` is
+materialised into a row per viewer at write time, which keeps that query
+identical whether the mention was personal or broadcast.
+
+Push recipients are resolved per message: anyone mentioned, plus anyone whose
+notification mode for that channel is "all", minus the author, minus anyone who
+can't view the channel, minus anyone who muted it. Delivery is spawned rather
+than awaited — sending to a dozen endpoints should never hold up the HTTP
+response for the message that triggered it. Subscriptions the browser has
+retired (HTTP 404/410) are deleted on the spot instead of being retried
+forever.
+
+The service worker suppresses a notification when a MiniChat window is already
+focused, so an open laptop doesn't double up with the in-app badge.
+
+## Uploads
+
+`POST /api/uploads` writes to disk before the caller decides whether to send
+the message, so abandoned files would otherwise accumulate. An hourly sweep
+compares the uploads directory against every URL the database still references
+— attachments, avatars, banners, webhook icons, custom emoji — and deletes
+unreferenced files older than a day. Treating the filesystem as the source of
+truth avoids a bookkeeping table that could drift out of sync with it.
+
 ## Voice and video
 
 1. Client asks `POST /api/voice/{channel}/token`
@@ -133,3 +166,14 @@ as strings.
 
 A member without `SPEAK` gets a token that cannot publish audio at all — the
 restriction is enforced by the SFU, not by hiding a button.
+
+Device selection, per-member volume and hotkey bindings are client-side and
+stored in `localStorage`: they describe one person's hardware and preferences,
+not instance state, so there is nothing for the server to know.
+
+Push-to-talk toggles the microphone track rather than the mute flag, so a held
+key never clobbers a manual mute. In a browser the bindings only fire while the
+window is focused, which is a platform limit; the desktop app registers the
+same actions as OS-level shortcuts and injects them into the page as
+`minichat:hotkey` events. That direction matters — the remote instance page has
+no IPC access, so Rust pushes events in rather than the page calling out.

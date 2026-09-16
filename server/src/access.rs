@@ -366,3 +366,51 @@ pub async fn instance(state: &AppState) -> AppResult<Instance> {
             .await?,
     )
 }
+
+/// Every member who can currently view a channel. Used by push dispatch, which
+/// must never notify someone about a channel they can't open.
+pub async fn channel_viewers(
+    state: &AppState,
+    channel_id: &str,
+) -> Result<std::collections::HashSet<String>, sqlx::Error> {
+    let overwrites: Vec<(String, i64, i64)> =
+        sqlx::query_as("SELECT role_id, allow, deny FROM channel_overwrites WHERE channel_id = ?")
+            .bind(channel_id)
+            .fetch_all(&state.db)
+            .await?;
+
+    let members: Vec<(String, bool)> = sqlx::query_as("SELECT id, is_operator FROM users")
+        .fetch_all(&state.db)
+        .await?;
+    let role_pairs: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT ur.user_id, r.id, r.permissions FROM user_roles ur JOIN roles r ON r.id = ur.role_id",
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut viewers = std::collections::HashSet::new();
+    for (user_id, is_operator) in members {
+        if is_operator {
+            viewers.insert(user_id);
+            continue;
+        }
+        let mut bits = 0i64;
+        let mut allow = 0i64;
+        let mut deny = 0i64;
+        for (uid, role_id, permissions) in &role_pairs {
+            if uid != &user_id {
+                continue;
+            }
+            bits |= permissions;
+            if let Some((_, a, d)) = overwrites.iter().find(|(rid, _, _)| rid == role_id) {
+                allow |= a;
+                deny |= d;
+            }
+        }
+        let effective = (bits & !deny) | allow;
+        if perms::has(effective, perms::VIEW_CHANNELS) {
+            viewers.insert(user_id);
+        }
+    }
+    Ok(viewers)
+}

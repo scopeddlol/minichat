@@ -235,6 +235,15 @@ pub struct Webhook {
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
+pub struct Emoji {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub created_by: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct AuditEntry {
     pub id: String,
     pub actor_id: Option<String>,

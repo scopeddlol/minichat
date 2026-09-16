@@ -22,6 +22,7 @@ pub const VIEW_AUDIT_LOG: i64 = 1 << 18;
 pub const MANAGE_WEBHOOKS: i64 = 1 << 19;
 pub const MANAGE_NICKNAMES: i64 = 1 << 20;
 pub const PIN_MESSAGES: i64 = 1 << 21;
+pub const MANAGE_EMOJI: i64 = 1 << 22;
 pub const ADMINISTRATOR: i64 = 1 << 30;
 
 /// Sensible defaults handed to the `@everyone`-style default role at setup time.
@@ -56,6 +57,7 @@ pub const ALL: i64 = VIEW_CHANNELS
     | MANAGE_WEBHOOKS
     | MANAGE_NICKNAMES
     | PIN_MESSAGES
+    | MANAGE_EMOJI
     | ADMINISTRATOR;
 
 /// A catalogue the admin UI renders so permission names never drift between

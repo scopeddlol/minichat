@@ -1,13 +1,15 @@
 import {
-  Download, Image as ImageIcon, Info, KeyRound, LogOut, Monitor, Moon, Palette, Smartphone,
-  Sun, User, X,
+  Bell, Download, Headphones, Image as ImageIcon, Info, KeyRound, LogOut, Monitor, Moon,
+  Palette, Smartphone, Sun, User, X,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, ApiError, setToken } from '../lib/api'
 import { useStore } from '../lib/store'
+import NotificationSettings from './settings/NotificationSettings'
+import VoiceSettings from './settings/VoiceSettings'
 import { Avatar, ColorField, Field, Modal, Switch, toast, useConfirm } from './ui'
 
-type Tab = 'profile' | 'appearance' | 'account' | 'about'
+type Tab = 'profile' | 'notifications' | 'voice' | 'appearance' | 'account' | 'about'
 type Theme = 'dark' | 'light' | 'system'
 
 export function getStoredTheme(): Theme {
@@ -121,6 +123,8 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
 
   const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: 'profile', label: 'Profile', icon: <User size={15} /> },
+    { key: 'notifications', label: 'Notifications', icon: <Bell size={15} /> },
+    { key: 'voice', label: 'Voice', icon: <Headphones size={15} /> },
     { key: 'appearance', label: 'Appearance', icon: <Palette size={15} /> },
     { key: 'account', label: 'Account', icon: <KeyRound size={15} /> },
     { key: 'about', label: 'Apps', icon: <Info size={15} /> },
@@ -272,6 +276,10 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
               </div>
             </div>
           )}
+
+          {tab === 'notifications' && <NotificationSettings />}
+
+          {tab === 'voice' && <VoiceSettings />}
 
           {tab === 'appearance' && (
             <div className="space-y-5 animate-fade-in">

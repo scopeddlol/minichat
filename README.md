@@ -20,7 +20,10 @@ the people you want and that's who's there.
 | | |
 |---|---|
 | **Text channels** | Markdown, replies, reactions, pins, edits, search, file uploads, slow mode |
-| **Voice & video** | LiveKit rooms per channel — camera, screen share, speaking indicators, moderator disconnect |
+| **Mentions** | `@name` autocomplete, a separate mention badge, and an unread divider so you can see where you left off |
+| **Notifications** | Web Push to phone and desktop, per-channel muting, and a test button |
+| **Custom emoji** | Upload your own, use them as `:name:` or as reactions |
+| **Voice & video** | LiveKit rooms per channel — camera, screen share, device pickers, per-member volume, push-to-talk, speaking indicators |
 | **Announcements** | Read-only channels where only the people you allow can post |
 | **Roles** | 23 permission flags, rank-based hierarchy, per-channel overrides |
 | **Invites** | Link-based signup with expiry, use limits and optional auto-granted roles |
@@ -63,6 +66,12 @@ Open `.env` and set your two domains, then generate the secrets:
 openssl rand -hex 32   # JWT_SECRET
 openssl rand -hex 32   # LIVEKIT_API_SECRET
 openssl rand -hex 16   # SETUP_TOKEN (optional but recommended)
+```
+
+For push notifications, generate a VAPID keypair and paste both halves in:
+
+```bash
+docker compose run --rm minichat minichat-server generate-vapid
 ```
 
 ### 3. Start it
@@ -115,6 +124,10 @@ the install prompt on Android, or the install icon in the address bar on
 desktop Chrome and Edge. Settings → **Apps** has a button that triggers it
 directly where the browser supports it.
 
+Installing matters on iPhone and iPad: Safari only delivers push notifications
+to apps on the Home Screen, never to a browser tab. Settings → **Notifications**
+says so in place of the toggle when it detects that situation.
+
 ### Windows desktop app
 
 A native window built with Tauri. Tag a release and GitHub Actions builds the
@@ -135,6 +148,12 @@ npm run build
 
 On first launch the app asks for your instance address and remembers it.
 **File → Switch instance…** changes it later.
+
+The desktop app also registers **global voice hotkeys**, so push-to-talk works
+while you're in a game or another window — something a browser tab fundamentally
+cannot do. Defaults are `F8` (push to talk), `F9` (mute) and `F10` (deafen);
+change them in `settings.json` inside the app's config directory, or turn them
+off from **File → Toggle global voice hotkeys**.
 
 ---
 
@@ -189,6 +208,14 @@ curl -X POST 'https://chat.example.com/webhooks/<id>/<token>' \
 unchanged. Treat the URL as a secret — anyone holding it can post.
 
 ---
+
+## Disk usage
+
+Uploads that are never attached to anything — a file picked and then abandoned,
+an avatar chosen but not saved — are swept hourly once they're a day old. The
+sweep compares the uploads directory against every URL the database still
+references, so nothing in use is ever touched. Admin panel → **Overview** shows
+total upload size, and `POST /api/admin/sweep-uploads` runs it on demand.
 
 ## Backups
 

@@ -231,6 +231,21 @@ export interface InvitePreview {
   member_count: number
 }
 
+export interface Emoji {
+  id: string
+  name: string
+  url: string
+  created_by: string | null
+  created_at: string
+}
+
+export type NotificationMode = 'all' | 'mentions' | 'none'
+
+export interface NotificationPreferences {
+  mode: NotificationMode
+  channels: { channel_id: string; mode: NotificationMode }[]
+}
+
 export interface ReadyPayload {
   me: Me
   instance: Instance
@@ -241,6 +256,10 @@ export interface ReadyPayload {
   voice_states: VoiceState[]
   read_state: { channel_id: string; last_read_id: string }[]
   unread: Record<string, number>
+  mentions: Record<string, number>
+  emojis: Emoji[]
+  notifications: NotificationPreferences
+  push_enabled: boolean
   permissions: string
   channel_permissions: Record<string, string>
   voice_enabled: boolean

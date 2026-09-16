@@ -7,8 +7,10 @@ use crate::access;
 use crate::auth::Auth;
 use crate::error::{AppError, AppResult};
 use crate::ids;
+use crate::mentions;
 use crate::models::MessageRow;
 use crate::perms;
+use crate::push;
 use crate::state::AppState;
 use crate::validate;
 
@@ -20,6 +22,9 @@ pub struct ListQuery {
     pub before: Option<String>,
     /// Fetch messages newer than this ID.
     pub after: Option<String>,
+    /// Fetch a window centred on this ID — used when jumping to a message
+    /// that isn't in the currently loaded page.
+    pub around: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -31,6 +36,35 @@ pub async fn list_messages(
 ) -> AppResult<Json<Value>> {
     access::require_channel_perm(&state, &auth, &channel_id, perms::VIEW_CHANNELS).await?;
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
+
+    // A window centred on one message: half before, half after, plus the
+    // target itself.
+    if let Some(around) = &query.around {
+        let half = (limit / 2).max(1);
+        let mut rows: Vec<MessageRow> = sqlx::query_as(
+            "SELECT * FROM messages WHERE channel_id = ? AND id <= ? ORDER BY id DESC LIMIT ?",
+        )
+        .bind(&channel_id)
+        .bind(around)
+        .bind(half + 1)
+        .fetch_all(&state.db)
+        .await?;
+        rows.reverse();
+
+        let newer: Vec<MessageRow> = sqlx::query_as(
+            "SELECT * FROM messages WHERE channel_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+        )
+        .bind(&channel_id)
+        .bind(around)
+        .bind(half)
+        .fetch_all(&state.db)
+        .await?;
+        rows.extend(newer);
+
+        return Ok(Json(json!(
+            access::hydrate_messages(&state, rows, auth.id()).await?
+        )));
+    }
 
     let rows: Vec<MessageRow> =
         match (&query.before, &query.after) {
@@ -196,6 +230,10 @@ pub async fn create_message(
     }
     tx.commit().await?;
 
+    let resolved =
+        mentions::resolve(&state, &content, perms::has(bits, perms::MENTION_EVERYONE)).await?;
+    mentions::store(&state, &message_id, &channel_id, Some(auth.id()), &resolved).await?;
+
     let row: MessageRow = sqlx::query_as("SELECT * FROM messages WHERE id = ?")
         .bind(&message_id)
         .fetch_one(&state.db)
@@ -207,7 +245,74 @@ pub async fn create_message(
         "MESSAGE_CREATE",
         serde_json::to_value(&message).unwrap_or(Value::Null),
     );
+
+    // Tell mentioned members even if they aren't looking at the channel.
+    for user_id in &resolved.user_ids {
+        if user_id == auth.id() {
+            continue;
+        }
+        state.emit_user(
+            user_id,
+            "MENTION_ADD",
+            json!({ "channel_id": channel_id, "message_id": message_id }),
+        );
+    }
+
+    notify_new_message(
+        &state,
+        &channel_id,
+        &channel.name,
+        &auth,
+        &message_id,
+        &content,
+        input.attachments.len(),
+        &resolved,
+    )
+    .await;
+
     Ok(Json(json!(message)))
+}
+
+/// Work out who wants a push for this message and hand it to the dispatcher.
+#[allow(clippy::too_many_arguments)]
+async fn notify_new_message(
+    state: &AppState,
+    channel_id: &str,
+    channel_name: &str,
+    auth: &Auth,
+    message_id: &str,
+    content: &str,
+    attachment_count: usize,
+    resolved: &mentions::Resolved,
+) {
+    let recipients = match push::recipients_for_message(
+        state,
+        channel_id,
+        Some(auth.id()),
+        &resolved.user_ids,
+        resolved.everyone,
+    )
+    .await
+    {
+        Ok(recipients) => recipients,
+        Err(e) => {
+            tracing::warn!("could not resolve push recipients: {e}");
+            return;
+        }
+    };
+
+    push::dispatch(
+        state,
+        recipients,
+        push::PushPayload {
+            title: format!("{} in #{}", auth.user.display_name, channel_name),
+            body: push::payload_preview(content, attachment_count),
+            icon: auth.user.avatar_url.clone(),
+            tag: channel_id.to_string(),
+            channel_id: channel_id.to_string(),
+            message_id: message_id.to_string(),
+        },
+    );
 }
 
 #[derive(Deserialize)]
@@ -249,6 +354,12 @@ pub async fn edit_message(
         .bind(&id)
         .execute(&state.db)
         .await?;
+
+    // Editing a mention out of a message should clear the ping too.
+    let bits = access::channel_permissions(&state, &auth, &row.channel_id).await?;
+    let resolved =
+        mentions::resolve(&state, &content, perms::has(bits, perms::MENTION_EVERYONE)).await?;
+    mentions::store(&state, &id, &row.channel_id, Some(auth.id()), &resolved).await?;
 
     let row: MessageRow = sqlx::query_as("SELECT * FROM messages WHERE id = ?")
         .bind(&id)
@@ -381,6 +492,16 @@ pub async fn add_reaction(
     Path((id, emoji)): Path<(String, String)>,
 ) -> AppResult<Json<Value>> {
     let emoji = validate::emoji(&emoji)?;
+    if emoji.starts_with(':') {
+        let name = emoji.trim_matches(':');
+        let exists: Option<String> = sqlx::query_scalar("SELECT id FROM emojis WHERE name = ?")
+            .bind(name)
+            .fetch_optional(&state.db)
+            .await?;
+        if exists.is_none() {
+            return Err(AppError::bad("That emoji no longer exists."));
+        }
+    }
     let channel_id: String = sqlx::query_scalar("SELECT channel_id FROM messages WHERE id = ?")
         .bind(&id)
         .fetch_optional(&state.db)

@@ -3,7 +3,8 @@ import { api, ApiError, getToken, setToken } from './api'
 import { gateway, type GatewayEvent, type GatewayStatus } from './gateway'
 import { toBits } from './perms'
 import type {
-  Category, Channel, Instance, InstanceMeta, Me, Member, Message, Role, VoiceState,
+  Category, Channel, Emoji, Instance, InstanceMeta, Me, Member, Message,
+  NotificationPreferences, Role, VoiceState,
 } from './types'
 
 export type AppPhase = 'loading' | 'setup' | 'anonymous' | 'ready' | 'error'
@@ -36,11 +37,21 @@ interface AppState {
   hasMore: Record<string, boolean>
   loadingChannel: Record<string, boolean>
   unread: Record<string, number>
+  /** Unread mentions per channel — tracked apart from unread messages so the
+   *  sidebar can shout about one and stay quiet about the other. */
+  mentionCounts: Record<string, number>
   lastRead: Record<string, string>
   typing: Record<string, TypingEntry[]>
 
+  emojis: Emoji[]
+  notifications: NotificationPreferences
+  pushEnabled: boolean
+
   connection: GatewayStatus
   activeChannelId: string | null
+  /** Set when the user asks to jump to a specific message; the message list
+   *  consumes it, scrolls there and clears it. */
+  pendingJump: { channelId: string; messageId: string } | null
 
   boot: () => Promise<void>
   finishAuth: (token: string) => Promise<void>
@@ -56,6 +67,9 @@ interface AppState {
   patchMe: (me: Me) => void
   refreshMembers: () => Promise<void>
   refreshChannelPermissions: () => Promise<void>
+  jumpToMessage: (channelId: string, messageId: string) => Promise<void>
+  clearJump: () => void
+  setNotifications: (preferences: NotificationPreferences) => void
 }
 
 const TYPING_TTL = 7000
@@ -99,11 +113,17 @@ export const useStore = create<AppState>((set, get) => ({
   hasMore: {},
   loadingChannel: {},
   unread: {},
+  mentionCounts: {},
   lastRead: {},
   typing: {},
 
+  emojis: [],
+  notifications: { mode: 'mentions', channels: [] },
+  pushEnabled: false,
+
   connection: 'closed',
   activeChannelId: null,
+  pendingJump: null,
 
   async boot() {
     try {
@@ -291,7 +311,10 @@ export const useStore = create<AppState>((set, get) => ({
   markRead(channelId) {
     const list = get().messages[channelId] ?? []
     const last = list[list.length - 1]
-    set((s) => ({ unread: { ...s.unread, [channelId]: 0 } }))
+    set((s) => ({
+      unread: { ...s.unread, [channelId]: 0 },
+      mentionCounts: { ...s.mentionCounts, [channelId]: 0 },
+    }))
     if (!last || last.pending) return
     set((s) => ({ lastRead: { ...s.lastRead, [channelId]: last.id } }))
     gateway.send({ op: 'ack', channel_id: channelId, message_id: last.id })
@@ -353,6 +376,10 @@ export const useStore = create<AppState>((set, get) => ({
           members,
           voiceStates,
           unread: d.unread ?? {},
+          mentionCounts: d.mentions ?? {},
+          emojis: d.emojis ?? [],
+          notifications: d.notifications ?? { mode: 'mentions', channels: [] },
+          pushEnabled: Boolean(d.push_enabled),
           lastRead,
           voiceEnabled: d.voice_enabled,
           livekitUrl: d.livekit_url,
@@ -364,6 +391,34 @@ export const useStore = create<AppState>((set, get) => ({
 
       case 'INVALID_SESSION': {
         get().logout()
+        break
+      }
+
+      case 'MENTION_ADD': {
+        const { channel_id } = d as { channel_id: string }
+        if (get().activeChannelId === channel_id && document.visibilityState === 'visible') break
+        set((s) => ({
+          mentionCounts: {
+            ...s.mentionCounts,
+            [channel_id]: (s.mentionCounts[channel_id] ?? 0) + 1,
+          },
+        }))
+        break
+      }
+
+      case 'EMOJI_CREATE':
+      case 'EMOJI_UPDATE': {
+        const emoji = d as Emoji
+        set((s) => ({
+          emojis: [...s.emojis.filter((e) => e.id !== emoji.id), emoji].sort((a, b) =>
+            a.name.localeCompare(b.name),
+          ),
+        }))
+        break
+      }
+
+      case 'EMOJI_DELETE': {
+        set((s) => ({ emojis: s.emojis.filter((e) => e.id !== d.id) }))
         break
       }
 
@@ -586,6 +641,38 @@ export const useStore = create<AppState>((set, get) => ({
       me,
       members: { ...s.members, [me.id]: { ...s.members[me.id], ...me } },
     }))
+  },
+
+  /**
+   * Jump to a message that may not be in the loaded page. Fetches a window
+   * centred on it when needed, then hands the ID to the message list.
+   */
+  async jumpToMessage(channelId, messageId) {
+    const loaded = get().messages[channelId] ?? []
+    if (get().activeChannelId !== channelId) set({ activeChannelId: channelId })
+
+    if (!loaded.some((m) => m.id === messageId)) {
+      try {
+        const window = await api.messages(channelId, { around: messageId, limit: 50 })
+        set((s) => ({
+          messages: { ...s.messages, [channelId]: window },
+          // The window is a slice out of the middle, so older messages almost
+          // certainly exist above it.
+          hasMore: { ...s.hasMore, [channelId]: window.length > 0 },
+        }))
+      } catch {
+        return
+      }
+    }
+    set({ pendingJump: { channelId, messageId } })
+  },
+
+  clearJump() {
+    set({ pendingJump: null })
+  },
+
+  setNotifications(preferences) {
+    set({ notifications: preferences })
   },
 
   async refreshChannelPermissions() {

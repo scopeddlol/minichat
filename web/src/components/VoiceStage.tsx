@@ -1,5 +1,5 @@
-import { Maximize2, MicOff, Minimize2, ScreenShare, UserX, Video, Wifi } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { Maximize2, MicOff, Minimize2, ScreenShare, UserX, Video, Volume2, VolumeX, Wifi } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { Track, type Track as TrackType } from 'livekit-client'
 import { api } from '../lib/api'
 import { can, P } from '../lib/perms'
@@ -97,6 +97,10 @@ function Tile({
   canModerate?: boolean
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [volumeOpen, setVolumeOpen] = useState(false)
+  const volumes = useVoice((s) => s.volumes)
+  const setUserVolume = useVoice((s) => s.setUserVolume)
+  const volume = volumes[participant.identity] ?? 1
   const name = member?.display_name ?? participant.name
 
   useEffect(() => {
@@ -151,7 +155,45 @@ function Tile({
         {participant.muted && <MicOff size={12} className="shrink-0" style={{ color: 'var(--danger)' }} />}
       </div>
 
+      {volumeOpen && !participant.isLocal && (
+        <div
+          className="absolute bottom-9 left-1.5 right-1.5 z-10 flex items-center gap-2 px-2 py-1.5 rounded-lg animate-pop-in"
+          style={{ background: 'var(--surface-0)', boxShadow: 'var(--shadow-md)' }}
+        >
+          <button
+            onClick={() => setUserVolume(participant.identity, volume === 0 ? 1 : 0)}
+            style={{ color: volume === 0 ? 'var(--danger)' : 'var(--text-muted)' }}
+            aria-label={volume === 0 ? `Unmute ${name}` : `Mute ${name}`}
+          >
+            {volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={2}
+            step={0.05}
+            value={volume}
+            onChange={(event) => setUserVolume(participant.identity, Number(event.target.value))}
+            className="flex-1 accent-[var(--accent)]"
+            aria-label={`Volume for ${name}`}
+          />
+          <span className="text-[0.62rem] tabular-nums w-8 text-right" style={{ color: 'var(--text-faint)' }}>
+            {Math.round(volume * 100)}
+          </span>
+        </div>
+      )}
+
       <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {!participant.isLocal && (
+          <button
+            className="btn btn-subtle !p-1"
+            onClick={() => setVolumeOpen((value) => !value)}
+            title={`Volume for ${name}`}
+            style={volume === 0 ? { color: 'var(--danger)' } : undefined}
+          >
+            {volume === 0 ? <VolumeX size={12} /> : <Volume2 size={12} />}
+          </button>
+        )}
         {onFocus && hasVisual && (
           <button className="btn btn-subtle !p-1" onClick={onFocus} title="Focus">
             <Maximize2 size={12} />

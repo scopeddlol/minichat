@@ -27,6 +27,15 @@ export default function MessageList({
   const loadOlder = useStore((s) => s.loadOlder)
   const markRead = useStore((s) => s.markRead)
   const instance = useStore((s) => s.instance)
+  const lastReadId = useStore((s) => s.lastRead[channel.id])
+  const pendingJump = useStore((s) => s.pendingJump)
+  const clearJump = useStore((s) => s.clearJump)
+
+  // The divider is pinned when the channel opens so it doesn't creep downward
+  // as new messages arrive while you're reading.
+  const [dividerAfterId, setDividerAfterId] = useState<string | null>(null)
+  const [flashId, setFlashId] = useState<string | null>(null)
+  const messageRefs = useRef(new Map<string, HTMLDivElement>())
 
   const scroller = useRef<HTMLDivElement>(null)
   const bottomAnchor = useRef<HTMLDivElement>(null)
@@ -57,6 +66,38 @@ export default function MessageList({
       void loadOlder(channel.id)
     }
   }, [channel.id, hasMore, loading, loadOlder, markRead])
+
+  // Pin the unread divider to whatever was unread when the channel opened.
+  useEffect(() => {
+    setDividerAfterId(lastReadId ?? null)
+    // Only on channel change — `lastReadId` updates as we read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel.id])
+
+  // Scroll to and flash a message the user asked to jump to.
+  useEffect(() => {
+    if (!pendingJump || pendingJump.channelId !== channel.id) return
+    const target = pendingJump.messageId
+    let cancelled = false
+
+    // Give the list a frame to render the freshly-loaded window.
+    const timer = setTimeout(() => {
+      if (cancelled) return
+      const element = messageRefs.current.get(target)
+      if (element) {
+        element.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        pinnedToBottom.current = false
+        setFlashId(target)
+        setTimeout(() => setFlashId((current) => (current === target ? null : current)), 2200)
+      }
+      clearJump()
+    }, 60)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [pendingJump, channel.id, clearJump])
 
   // Jump to the newest message when the channel changes.
   useLayoutEffect(() => {
@@ -129,17 +170,31 @@ export default function MessageList({
           const showDivider =
             !previous ||
             parseDate(previous.created_at).toDateString() !== parseDate(message.created_at).toDateString()
+          // The first message newer than where we left off.
+          const showUnread =
+            Boolean(dividerAfterId) &&
+            message.id > (dividerAfterId as string) &&
+            (!previous || previous.id <= (dividerAfterId as string)) &&
+            message.author?.id !== useStore.getState().me?.id
 
           return (
-            <div key={message.id}>
+            <div
+              key={message.id}
+              ref={(element) => {
+                if (element) messageRefs.current.set(message.id, element)
+                else messageRefs.current.delete(message.id)
+              }}
+            >
               {showDivider && <DayDivider label={formatDayDivider(message.created_at)} />}
+              {showUnread && <UnreadDivider />}
               <MessageItem
                 message={message}
-                grouped={!showDivider && shouldGroup(previous, message)}
+                grouped={!showDivider && !showUnread && shouldGroup(previous, message)}
                 channelPermissions={channelPermissions}
                 onReply={onReply}
                 onOpenProfile={onOpenProfile}
                 onOpenImage={onOpenImage}
+                highlight={flashId === message.id}
               />
             </div>
           )
@@ -166,6 +221,21 @@ export default function MessageList({
           <ArrowDown size={15} /> Jump to latest
         </button>
       )}
+    </div>
+  )
+}
+
+/** The "new messages" line, styled distinctly from a date separator. */
+function UnreadDivider() {
+  return (
+    <div className="flex items-center gap-2 px-4 my-2 select-none">
+      <div className="flex-1 h-px" style={{ background: 'var(--danger)' }} />
+      <span
+        className="text-[0.62rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+        style={{ background: 'var(--danger)', color: '#fff' }}
+      >
+        New
+      </span>
     </div>
   )
 }

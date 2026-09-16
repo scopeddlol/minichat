@@ -1,9 +1,11 @@
 pub mod admin;
 pub mod auth_routes;
 pub mod channels;
+pub mod emojis;
 pub mod instance;
 pub mod invites;
 pub mod messages;
+pub mod notifications;
 pub mod setup;
 pub mod snapshot;
 pub mod uploads;
@@ -79,6 +81,18 @@ pub fn api_router() -> Router<AppState> {
             put(messages::add_reaction).delete(messages::remove_reaction),
         )
         .route("/search", get(messages::search))
+        // ---- notifications ----
+        .route("/push/key", get(notifications::public_key))
+        .route("/push/subscribe", post(notifications::subscribe))
+        .route("/push/unsubscribe", post(notifications::unsubscribe))
+        .route("/push/test", post(notifications::test))
+        .route(
+            "/notifications",
+            get(notifications::get_preferences).patch(notifications::update_preferences),
+        )
+        // ---- custom emoji ----
+        .route("/emojis", get(emojis::list).post(emojis::create))
+        .route("/emojis/{id}", patch(emojis::rename).delete(emojis::delete))
         // ---- uploads ----
         .route("/uploads", post(uploads::upload))
         // ---- voice ----
@@ -97,6 +111,7 @@ pub fn api_router() -> Router<AppState> {
             get(admin::get_instance).patch(admin::update_instance),
         )
         .route("/admin/stats", get(admin::stats))
+        .route("/admin/sweep-uploads", post(admin::sweep_uploads))
         .route("/admin/permissions", get(admin::permission_catalog))
         .route(
             "/admin/roles",

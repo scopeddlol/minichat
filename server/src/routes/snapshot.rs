@@ -61,6 +61,19 @@ pub async fn build(state: &AppState, auth: &Auth) -> AppResult<Value> {
 
     let voice_states = state.voice_states().await;
 
+    // Mentions get their own counter: a channel with 40 unread messages and
+    // one mention should read very differently from one with 40 and none.
+    let mention_counts: serde_json::Map<String, Value> =
+        crate::mentions::unread_counts(state, &auth.user.id)
+            .await?
+            .into_iter()
+            .map(|(channel_id, count)| (channel_id, json!(count)))
+            .collect();
+
+    let emojis = crate::routes::emojis::all(state).await?;
+    let notifications =
+        crate::routes::notifications::preferences_payload(state, &auth.user.id).await?;
+
     let channel_permissions: serde_json::Map<String, Value> =
         access::channel_permission_map(state, auth)
             .await?
@@ -81,6 +94,10 @@ pub async fn build(state: &AppState, auth: &Auth) -> AppResult<Value> {
         "unread": unread,
         "permissions": auth.permissions.to_string(),
         "channel_permissions": channel_permissions,
+        "mentions": mention_counts,
+        "emojis": emojis,
+        "notifications": notifications,
+        "push_enabled": state.config.push_ready(),
         "voice_enabled": state.config.livekit_ready(),
         "livekit_url": state.config.livekit_url,
     }))

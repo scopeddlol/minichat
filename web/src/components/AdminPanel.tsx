@@ -1,5 +1,5 @@
 import {
-  Hash, LayoutDashboard, Link2, Palette, ScrollText, Shield, Users, Webhook, X,
+  Hash, LayoutDashboard, Link2, Palette, ScrollText, Shield, Smile, Users, Webhook, X,
 } from 'lucide-react'
 import { useState } from 'react'
 import { can, P } from '../lib/perms'
@@ -7,6 +7,7 @@ import { useStore } from '../lib/store'
 import AuditLog from './admin/AuditLog'
 import Branding from './admin/Branding'
 import Channels from './admin/Channels'
+import Emoji from './admin/Emoji'
 import Integrations from './admin/Integrations'
 import Invites from './admin/Invites'
 import Members from './admin/Members'
@@ -14,7 +15,9 @@ import Overview from './admin/Overview'
 import Roles from './admin/Roles'
 import { Modal } from './ui'
 
-type Tab = 'overview' | 'branding' | 'channels' | 'roles' | 'members' | 'invites' | 'integrations' | 'audit'
+type Tab =
+  | 'overview' | 'branding' | 'channels' | 'roles' | 'members' | 'emoji'
+  | 'invites' | 'integrations' | 'audit'
 
 export default function AdminPanel({
   open,
@@ -45,6 +48,7 @@ export default function AdminPanel({
       icon: <Users size={15} />,
       visible: can(permissions, P.KICK_MEMBERS) || can(permissions, P.BAN_MEMBERS) || can(permissions, P.MANAGE_ROLES),
     },
+    { key: 'emoji', label: 'Emoji', icon: <Smile size={15} />, visible: can(permissions, P.MANAGE_EMOJI) },
     { key: 'invites', label: 'Invites', icon: <Link2 size={15} />, visible: can(permissions, P.CREATE_INVITES) },
     {
       key: 'integrations',
@@ -115,6 +119,7 @@ export default function AdminPanel({
             {active === 'channels' && <Channels />}
             {active === 'roles' && <Roles />}
             {active === 'members' && <Members onOpenProfile={onOpenProfile} />}
+            {active === 'emoji' && <Emoji />}
             {active === 'invites' && <Invites />}
             {active === 'integrations' && <Integrations />}
             {active === 'audit' && <AuditLog />}

@@ -8,6 +8,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
+      // injectManifest rather than generateSW: the service worker carries our
+      // own push and notification-click handlers.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'],
       manifest: {
@@ -27,21 +32,12 @@ export default defineConfig({
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        // The API and gateway must never be served from cache: stale messages
-        // are worse than no messages.
-        navigateFallbackDenylist: [/^\/api/, /^\/uploads/, /^\/webhooks/],
-        runtimeCaching: [
-          {
-            urlPattern: /\/uploads\/.*/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'minichat-uploads',
-              expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 30 },
-            },
-          },
-        ],
+        // LiveKit is a large chunk and only loaded on demand; precaching it
+        // would bloat every install.
+        globIgnores: ['**/livekit-*.js'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
       devOptions: { enabled: false },
     }),

@@ -1,7 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core permissions for the local connect screen. Remote instance pages deliberately get no IPC access.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "Core permissions for the local connect screen, plus global shortcuts for voice hotkeys. Remote instance pages deliberately get no IPC access.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "global-shortcut:default"
+  ]
 }

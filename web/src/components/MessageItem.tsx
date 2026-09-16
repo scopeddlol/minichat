@@ -36,8 +36,10 @@ function MessageItemInner({
   const me = useStore((s) => s.me)
   const members = useStore((s) => s.members)
   const roles = useStore((s) => s.roles)
+  const emojis = useStore((s) => s.emojis)
   const messages = useStore((s) => s.messages)
   const retryMessage = useStore((s) => s.retryMessage)
+  const jumpToMessage = useStore((s) => s.jumpToMessage)
   const confirm = useConfirm()
 
   const [editing, setEditing] = useState(false)
@@ -139,7 +141,12 @@ function MessageItemInner({
 
       <div className="relative">
         {replyTarget && (
-          <div className="flex items-center gap-1.5 mb-0.5 ml-12 text-[0.78rem] min-w-0" style={{ color: 'var(--text-faint)' }}>
+          <button
+            className="flex items-center gap-1.5 mb-0.5 ml-12 text-[0.78rem] min-w-0 w-full text-left hover:opacity-80 transition-opacity"
+            style={{ color: 'var(--text-faint)' }}
+            onClick={() => jumpToMessage(message.channel_id, replyTarget.id)}
+            title="Jump to the original message"
+          >
             <CornerUpLeft size={12} className="shrink-0 -scale-y-100" />
             <Avatar
               id={replyTarget.author?.id ?? 'x'}
@@ -153,7 +160,7 @@ function MessageItemInner({
               {replyTarget.author?.display_name ?? 'Deleted member'}
             </span>
             <span className="truncate">{replyTarget.content || 'Attachment'}</span>
-          </div>
+          </button>
         )}
 
         <div className="flex gap-3">
@@ -241,7 +248,13 @@ function MessageItemInner({
                   className="md text-[0.92rem] leading-[1.5] break-words whitespace-pre-wrap"
                   style={{ fontSize: jumbo ? '2.4rem' : undefined, lineHeight: jumbo ? 1.2 : undefined }}
                 >
-                  {renderMarkdown(message.content, { members, roles, onMention: onOpenProfile })}
+                  {renderMarkdown(message.content, {
+                    members,
+                    roles,
+                    emojis,
+                    meId: me?.id,
+                    onMention: onOpenProfile,
+                  })}
                   {message.edited_at && !jumbo && (
                     <span className="text-[0.66rem] ml-1.5" style={{ color: 'var(--text-faint)' }} title="Edited">
                       (edited)
@@ -285,7 +298,7 @@ function MessageItemInner({
                       borderColor: reaction.me ? 'var(--accent)' : 'transparent',
                     }}
                   >
-                    <span>{reaction.emoji}</span>
+                    <ReactionGlyph emoji={reaction.emoji} emojis={emojis} />
                     <span className="tabular-nums" style={{ color: reaction.me ? 'var(--accent)' : 'var(--text-muted)' }}>
                       {reaction.count}
                     </span>
@@ -304,6 +317,16 @@ function MessageItemInner({
           >
             {pickerOpen && (
               <div className="flex items-center border-r" style={{ borderColor: 'var(--border)' }}>
+                {emojis.slice(0, 4).map((emoji) => (
+                  <button
+                    key={emoji.id}
+                    title={`:${emoji.name}:`}
+                    className="px-1.5 py-1.5 transition-transform hover:scale-125"
+                    onClick={() => void toggleReaction(`:${emoji.name}:`)}
+                  >
+                    <img src={emoji.url} alt={emoji.name} className="w-4 h-4 object-contain" />
+                  </button>
+                ))}
                 {QUICK_REACTIONS.map((emoji) => (
                   <button
                     key={emoji}
@@ -359,6 +382,20 @@ function MessageItemInner({
       </div>
     </article>
   )
+}
+
+/** A reaction is either a unicode emoji or a `:name:` custom-emoji reference. */
+function ReactionGlyph({ emoji, emojis }: { emoji: string; emojis: import('../lib/types').Emoji[] }) {
+  if (emoji.startsWith(':') && emoji.endsWith(':')) {
+    const name = emoji.slice(1, -1)
+    const custom = emojis.find((e) => e.name === name)
+    if (custom) {
+      return <img src={custom.url} alt={emoji} title={emoji} className="reaction-emoji" />
+    }
+    // The emoji was deleted after someone reacted with it.
+    return <span title={emoji}>❔</span>
+  }
+  return <span>{emoji}</span>
 }
 
 function ToolbarButton({

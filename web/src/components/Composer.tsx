@@ -1,11 +1,49 @@
-import { CornerUpLeft, Loader2, Plus, SendHorizontal, Smile, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { AtSign, CornerUpLeft, Loader2, Plus, SendHorizontal, Smile, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { formatBytes, formatSlowmode, isImage } from '../lib/format'
 import { can, P } from '../lib/perms'
 import { useStore } from '../lib/store'
-import type { Attachment, Channel, Message } from '../lib/types'
-import { toast } from './ui'
+import type { Attachment, Channel, Emoji, Member, Message } from '../lib/types'
+import { Avatar, toast } from './ui'
+
+/** One row in the autocomplete popup. */
+interface Suggestion {
+  key: string
+  /** Text substituted into the draft when chosen. */
+  insert: string
+  member?: Member
+  emoji?: Emoji
+}
+
+/** A live `@name` or `:name` token sitting just behind the caret. */
+interface ActiveToken {
+  kind: 'mention' | 'emoji'
+  query: string
+  /** Offset of the token's opening character in the draft. */
+  start: number
+}
+
+/**
+ * Find the token the caret is currently inside, if any. Returns null when the
+ * caret isn't in one, which closes the popup.
+ */
+function tokenAtCaret(text: string, caret: number): ActiveToken | null {
+  for (let i = caret - 1; i >= 0 && caret - i <= 33; i--) {
+    const c = text[i]
+    if (c === '@' || c === ':') {
+      // Must start at a word boundary, so emails and `a:b` don't trigger it.
+      const previous = i > 0 ? text[i - 1] : ' '
+      if (/[A-Za-z0-9_.\-]/.test(previous)) return null
+      const query = text.slice(i + 1, caret)
+      if (!/^[A-Za-z0-9_.\-]*$/.test(query)) return null
+      if (c === ':' && query.length < 1) return null
+      return { kind: c === '@' ? 'mention' : 'emoji', query, start: i }
+    }
+    if (!/[A-Za-z0-9_.\-]/.test(c)) return null
+  }
+  return null
+}
 
 const EMOJI = [
   '😀','😂','🥹','😊','😍','🤔','😎','🙃','😴','🤯','🥳','😭','😤','🤝','👍','👎','👏','🙌',
@@ -38,14 +76,21 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [cooldown, setCooldown] = useState(0)
   const [dragging, setDragging] = useState(false)
+  const [token, setToken] = useState<ActiveToken | null>(null)
+  const [highlighted, setHighlighted] = useState(0)
 
   const textarea = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const lastTyping = useRef(0)
 
+  const members = useStore((s) => s.members)
+  const emojis = useStore((s) => s.emojis)
+  const me = useStore((s) => s.me)
+
   const canSend = can(channelPermissions, P.SEND_MESSAGES)
   const canAttach = can(channelPermissions, P.ATTACH_FILES)
   const bypassSlowmode = can(channelPermissions, P.MANAGE_MESSAGES)
+  const canMentionEveryone = can(channelPermissions, P.MENTION_EVERYONE)
 
   // Draft per channel, so switching away doesn't lose what you typed.
   useEffect(() => {
@@ -76,6 +121,63 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
     return () => clearInterval(id)
   }, [cooldown])
 
+  const suggestions = useMemo<Suggestion[]>(() => {
+    if (!token) return []
+    const query = token.query.toLowerCase()
+
+    if (token.kind === 'mention') {
+      const matches = Object.values(members)
+        .filter(
+          (member) =>
+            member.id !== me?.id &&
+            (member.username.toLowerCase().startsWith(query) ||
+              member.display_name.toLowerCase().includes(query)),
+        )
+        // Prefer a username prefix match over a display-name substring.
+        .sort((a, b) => {
+          const aPrefix = a.username.toLowerCase().startsWith(query) ? 0 : 1
+          const bPrefix = b.username.toLowerCase().startsWith(query) ? 0 : 1
+          return aPrefix - bPrefix || a.display_name.localeCompare(b.display_name)
+        })
+        .slice(0, 8)
+        .map<Suggestion>((member) => ({
+          key: member.id,
+          insert: `@${member.username}`,
+          member,
+        }))
+
+      if (canMentionEveryone && 'everyone'.startsWith(query)) {
+        matches.unshift({ key: 'everyone', insert: '@everyone' })
+      }
+      return matches
+    }
+
+    return emojis
+      .filter((emoji) => emoji.name.includes(query))
+      .slice(0, 8)
+      .map<Suggestion>((emoji) => ({ key: emoji.id, insert: `:${emoji.name}:`, emoji }))
+  }, [token, members, emojis, me?.id, canMentionEveryone])
+
+  useEffect(() => setHighlighted(0), [token?.query, token?.kind])
+
+  const applySuggestion = useCallback(
+    (index: number) => {
+      const choice = suggestions[index]
+      if (!choice || !token) return
+      const element = textarea.current
+      const caret = element?.selectionStart ?? draft.length
+      const next = `${draft.slice(0, token.start)}${choice.insert} ${draft.slice(caret)}`
+      setDraft(next)
+      setToken(null)
+      requestAnimationFrame(() => {
+        const position = token.start + choice.insert.length + 1
+        element?.focus()
+        element?.setSelectionRange(position, position)
+      })
+    },
+    [suggestions, token, draft],
+  )
+
   const autoGrow = () => {
     const element = textarea.current
     if (!element) return
@@ -85,8 +187,9 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
 
   useEffect(autoGrow, [draft])
 
-  const onChange = (value: string) => {
+  const onChange = (value: string, caret: number) => {
     setDraft(value)
+    setToken(tokenAtCaret(value, caret))
     const now = Date.now()
     // Throttle typing notifications; the server broadcasts every one it gets.
     if (now - lastTyping.current > 3000 && value.trim()) {
@@ -179,6 +282,69 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
           <button className="btn btn-ghost !p-1" onClick={onCancelReply} aria-label="Cancel reply">
             <X size={13} />
           </button>
+        </div>
+      )}
+
+      {token && suggestions.length > 0 && (
+        <div
+          className="card mb-1 p-1 max-h-60 overflow-y-auto scroll-thin animate-pop-in"
+          style={{ boxShadow: 'var(--shadow-lg)' }}
+        >
+          <p
+            className="text-[0.62rem] font-bold uppercase tracking-wider px-2 py-1"
+            style={{ color: 'var(--text-faint)' }}
+          >
+            {token.kind === 'mention' ? 'Members' : 'Custom emoji'}
+          </p>
+          {suggestions.map((choice, index) => (
+            <button
+              key={choice.key}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault()
+                applySuggestion(index)
+              }}
+              onMouseEnter={() => setHighlighted(index)}
+              className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors"
+              style={{
+                background: index === highlighted ? 'var(--surface-2)' : 'transparent',
+              }}
+            >
+              {choice.member ? (
+                <>
+                  <Avatar
+                    id={choice.member.id}
+                    name={choice.member.display_name}
+                    src={choice.member.avatar_url}
+                    accent={choice.member.accent_color}
+                    size="sm"
+                  />
+                  <span className="text-sm font-medium truncate">{choice.member.display_name}</span>
+                  <span className="text-xs truncate" style={{ color: 'var(--text-faint)' }}>
+                    @{choice.member.username}
+                  </span>
+                </>
+              ) : choice.emoji ? (
+                <>
+                  <img src={choice.emoji.url} alt="" className="w-6 h-6 object-contain" />
+                  <span className="text-sm">:{choice.emoji.name}:</span>
+                </>
+              ) : (
+                <>
+                  <span
+                    className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+                    style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
+                  >
+                    <AtSign size={14} />
+                  </span>
+                  <span className="text-sm font-medium">@everyone</span>
+                  <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
+                    notifies everyone in this channel
+                  </span>
+                </>
+              )}
+            </button>
+          ))}
         </div>
       )}
 
@@ -287,7 +453,16 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
             ref={textarea}
             rows={1}
             value={draft}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={(event) => onChange(event.target.value, event.target.selectionStart ?? 0)}
+            onClick={(event) =>
+              setToken(
+                tokenAtCaret(
+                  (event.target as HTMLTextAreaElement).value,
+                  (event.target as HTMLTextAreaElement).selectionStart ?? 0,
+                ),
+              )
+            }
+            onBlur={() => setTimeout(() => setToken(null), 150)}
             onPaste={(event) => {
               const files = Array.from(event.clipboardData.files)
               if (files.length && canAttach) {
@@ -296,6 +471,30 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
               }
             }}
             onKeyDown={(event) => {
+              // While the autocomplete is open it owns the arrow keys, Enter
+              // and Tab; otherwise Enter sends as usual.
+              if (token && suggestions.length) {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  setHighlighted((value) => (value + 1) % suggestions.length)
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setHighlighted((value) => (value - 1 + suggestions.length) % suggestions.length)
+                  return
+                }
+                if (event.key === 'Enter' || event.key === 'Tab') {
+                  event.preventDefault()
+                  applySuggestion(highlighted)
+                  return
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setToken(null)
+                  return
+                }
+              }
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 void submit()
@@ -326,22 +525,56 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setEmojiOpen(false)} />
                 <div
-                  className="absolute bottom-full right-0 mb-2 z-20 card p-2 grid grid-cols-9 gap-0.5 animate-pop-in"
+                  className="absolute bottom-full right-0 mb-2 z-20 card p-2 animate-pop-in max-h-72 overflow-y-auto scroll-thin"
                   style={{ width: 296, boxShadow: 'var(--shadow-lg)' }}
                 >
-                  {EMOJI.map((emoji) => (
-                    <button
-                      key={emoji}
-                      className="p-1 rounded text-lg transition-transform hover:scale-125"
-                      onClick={() => {
-                        setDraft((value) => value + emoji)
-                        setEmojiOpen(false)
-                        textarea.current?.focus()
-                      }}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
+                  {emojis.length > 0 && (
+                    <>
+                      <p
+                        className="text-[0.62rem] font-bold uppercase tracking-wider px-1 pb-1"
+                        style={{ color: 'var(--text-faint)' }}
+                      >
+                        This instance
+                      </p>
+                      <div className="grid grid-cols-9 gap-0.5 mb-2">
+                        {emojis.map((emoji) => (
+                          <button
+                            key={emoji.id}
+                            title={`:${emoji.name}:`}
+                            className="p-1 rounded transition-transform hover:scale-125"
+                            onClick={() => {
+                              setDraft((value) => `${value}:${emoji.name}: `)
+                              setEmojiOpen(false)
+                              textarea.current?.focus()
+                            }}
+                          >
+                            <img src={emoji.url} alt={emoji.name} className="w-6 h-6 object-contain" />
+                          </button>
+                        ))}
+                      </div>
+                      <p
+                        className="text-[0.62rem] font-bold uppercase tracking-wider px-1 pb-1"
+                        style={{ color: 'var(--text-faint)' }}
+                      >
+                        Standard
+                      </p>
+                    </>
+                  )}
+                  <div className="grid grid-cols-9 gap-0.5">
+                    {EMOJI.map((emoji) => (
+                      <button
+                        key={emoji}
+                        className="p-1 rounded text-lg transition-transform hover:scale-125"
+                        onClick={() => {
+                          setDraft((value) => value + emoji)
+                          setEmojiOpen(false)
+                          textarea.current?.focus()
+                        }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </>
             )}

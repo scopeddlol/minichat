@@ -25,6 +25,7 @@ export const P = {
   MANAGE_WEBHOOKS: 1n << 19n,
   MANAGE_NICKNAMES: 1n << 20n,
   PIN_MESSAGES: 1n << 21n,
+  MANAGE_EMOJI: 1n << 22n,
   ADMINISTRATOR: 1n << 30n,
 } as const
 
@@ -53,6 +54,7 @@ export const ADMIN_PERMS = [
   P.BAN_MEMBERS,
   P.VIEW_AUDIT_LOG,
   P.MANAGE_WEBHOOKS,
+  P.MANAGE_EMOJI,
 ]
 
 export function canSeeAdminPanel(bits: bigint): boolean {

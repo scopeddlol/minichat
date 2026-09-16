@@ -16,6 +16,7 @@ import { Modal, Spinner, EmptyState } from '../components/ui'
 import { api } from '../lib/api'
 import { formatSlowmode, formatTimestamp } from '../lib/format'
 import { gateway } from '../lib/gateway'
+import { attachHotkeys, loadBindings } from '../lib/hotkeys'
 import { can, P } from '../lib/perms'
 import { pruneTyping, useStore } from '../lib/store'
 import type { Attachment, Message } from '../lib/types'
@@ -69,6 +70,38 @@ export default function Chat() {
   }, [])
 
   useEffect(() => setReplyTo(null), [activeChannelId])
+
+  // Voice hotkeys. Bindings are re-read on every press, so changing one in
+  // settings takes effect without remounting.
+  useEffect(() => {
+    return attachHotkeys(loadBindings, {
+      onPushToTalk: (active) => useVoice.getState().setPushToTalk(active),
+      onToggleMute: () => void useVoice.getState().toggleMute(),
+      onToggleDeafen: () => void useVoice.getState().toggleDeafen(),
+    })
+  }, [])
+
+  // Opening a notification asks the service worker to bring us to the message.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; channelId?: string; messageId?: string }
+      if (data?.type !== 'minichat:navigate' || !data.channelId) return
+      if (data.messageId) void useStore.getState().jumpToMessage(data.channelId, data.messageId)
+      else useStore.getState().setActiveChannel(data.channelId)
+    }
+    navigator.serviceWorker?.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker?.removeEventListener('message', onMessage)
+  }, [])
+
+  // A notification that opened a fresh window carries the channel in the URL.
+  useEffect(() => {
+    const target = new URLSearchParams(location.search).get('channel')
+    if (!target) return
+    window.history.replaceState({}, '', '/')
+    if (useStore.getState().channels.some((channel) => channel.id === target)) {
+      useStore.getState().setActiveChannel(target)
+    }
+  }, [])
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -302,7 +335,7 @@ function SearchModal({
   onOpenProfile: (userId: string) => void
 }) {
   const channels = useStore((s) => s.channels)
-  const setActiveChannel = useStore((s) => s.setActiveChannel)
+  const jumpToMessage = useStore((s) => s.jumpToMessage)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Message[]>([])
   const [searching, setSearching] = useState(false)
@@ -360,7 +393,7 @@ function SearchModal({
                 key={message.id}
                 className="w-full text-left px-4 py-3 border-b transition-colors hover:bg-[var(--surface-2)]"
                 onClick={() => {
-                  setActiveChannel(message.channel_id)
+                  void jumpToMessage(message.channel_id, message.id)
                   onClose()
                 }}
               >
@@ -424,7 +457,14 @@ function PinsModal({ open, onClose, channelId }: { open: boolean; onClose: () =>
           </div>
         ) : pins.length ? (
           pins.map((message) => (
-            <div key={message.id} className="px-5 py-3 border-b last:border-b-0">
+            <button
+              key={message.id}
+              className="w-full text-left px-5 py-3 border-b last:border-b-0 transition-colors hover:bg-[var(--surface-2)]"
+              onClick={() => {
+                void useStore.getState().jumpToMessage(message.channel_id, message.id)
+                onClose()
+              }}
+            >
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs font-semibold">
                   {message.author?.display_name ?? message.webhook_name ?? 'Deleted member'}
@@ -436,7 +476,7 @@ function PinsModal({ open, onClose, channelId }: { open: boolean; onClose: () =>
               <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-muted)' }}>
                 {message.content || 'Attachment'}
               </p>
-            </div>
+            </button>
           ))
         ) : (
           <EmptyState icon={<Pin size={20} />} title="Nothing pinned" body="Pin an important message and it'll show up here." />

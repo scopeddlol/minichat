@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Fragment, useState } from 'react'
-import type { Member, Role } from './types'
+import type { Emoji, Member, Role } from './types'
 
 /**
  * A small markdown subset rendered straight to React nodes. Nothing is ever
@@ -10,6 +10,9 @@ import type { Member, Role } from './types'
 interface RenderContext {
   members: Record<string, Member>
   roles: Role[]
+  emojis: Emoji[]
+  /** Highlights mentions of the signed-in member. */
+  meId?: string
   onMention?: (userId: string) => void
 }
 
@@ -45,8 +48,10 @@ const INLINE_RULES: {
   { name: 'italic', pattern: /(?:\*([^*\n]+?)\*|_([^_\n]+?)_)/ },
   { name: 'spoiler', pattern: /\|\|([\s\S]+?)\|\|/ },
   { name: 'link', pattern: /(https?:\/\/[^\s<>()]+[^\s<>().,!?;:'"])/ },
-  { name: 'mention', pattern: /<@([A-Za-z0-9]+)>/ },
-  { name: 'everyone', pattern: /(@everyone|@here)/ },
+  // A mention must start at a word boundary so an email address doesn't
+  // become a ping. Mirrors the server's parser in `server/src/mentions.rs`.
+  { name: 'mention', pattern: /(?<![A-Za-z0-9_.\-])@([A-Za-z0-9_][A-Za-z0-9_.-]{1,31})/ },
+  { name: 'emoji', pattern: /:([a-z0-9_]{2,32}):/i },
 ]
 
 function renderInline(text: string, context: RenderContext, keyPrefix: string): ReactNode[] {
@@ -105,25 +110,64 @@ function renderInline(text: string, context: RenderContext, keyPrefix: string): 
         )
         break
       case 'mention': {
-        const member = context.members[inner]
+        // Trailing punctuation isn't part of a username: "@ada." → "ada".
+        let name = inner
+        let trailing = ''
+        while (name.endsWith('.') || name.endsWith('-')) {
+          trailing = name.slice(-1) + trailing
+          name = name.slice(0, -1)
+        }
+
+        if (name.toLowerCase() === 'everyone' || name.toLowerCase() === 'here') {
+          nodes.push(
+            <span key={id} className="mention mention-self">
+              @{name}
+            </span>,
+          )
+          if (trailing) nodes.push(trailing)
+          break
+        }
+
+        const member = Object.values(context.members).find(
+          (m) => m.username.toLowerCase() === name.toLowerCase(),
+        )
+        if (!member) {
+          // Not a real member — leave it as ordinary text.
+          nodes.push(raw)
+          break
+        }
         nodes.push(
           <span
             key={id}
-            className="mention"
-            onClick={() => member && context.onMention?.(member.id)}
+            className={`mention${member.id === context.meId ? ' mention-self' : ''}`}
+            onClick={() => context.onMention?.(member.id)}
+            role="button"
+            tabIndex={0}
           >
-            @{member?.display_name ?? 'unknown'}
+            @{member.display_name}
           </span>,
+        )
+        if (trailing) nodes.push(trailing)
+        break
+      }
+      case 'emoji': {
+        const emoji = context.emojis.find((e) => e.name === inner.toLowerCase())
+        if (!emoji) {
+          nodes.push(raw)
+          break
+        }
+        nodes.push(
+          <img
+            key={id}
+            src={emoji.url}
+            alt={`:${emoji.name}:`}
+            title={`:${emoji.name}:`}
+            className="custom-emoji"
+            loading="lazy"
+          />,
         )
         break
       }
-      case 'everyone':
-        nodes.push(
-          <span key={id} className="mention">
-            {raw}
-          </span>,
-        )
-        break
     }
 
     remaining = remaining.slice(bestIndex + raw.length)

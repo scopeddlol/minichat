@@ -125,10 +125,21 @@ pub fn safe_url(value: &str, field: &str) -> AppResult<Option<String>> {
     }
 }
 
+/// A reaction is either a short unicode emoji or a `:custom_name:` reference.
 pub fn emoji(value: &str) -> AppResult<String> {
     let v = value.trim();
     let len = v.chars().count();
-    if v.is_empty() || len > 8 {
+    if v.is_empty() {
+        return Err(AppError::bad("That's not a valid reaction."));
+    }
+    if v.starts_with(':') && v.ends_with(':') && (4..=34).contains(&len) {
+        let name = &v[1..v.len() - 1];
+        if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Ok(v.to_lowercase());
+        }
+        return Err(AppError::bad("That's not a valid reaction."));
+    }
+    if len > 8 {
         return Err(AppError::bad("That's not a valid reaction."));
     }
     Ok(v.to_string())

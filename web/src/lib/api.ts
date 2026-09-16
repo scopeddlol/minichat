@@ -1,7 +1,7 @@
 import type {
-  Attachment, AuditEntry, BanEntry, Category, Channel, Instance, Invite,
-  InvitePreview, InstanceMeta, Me, Member, Message, PermissionDef, Role, Stats,
-  VoiceState, Webhook,
+  Attachment, AuditEntry, BanEntry, Category, Channel, Emoji, Instance, Invite,
+  InvitePreview, InstanceMeta, Me, Member, Message, NotificationMode,
+  NotificationPreferences, PermissionDef, Role, Stats, VoiceState, Webhook,
 } from './types'
 
 const TOKEN_KEY = 'minichat.token'
@@ -141,10 +141,14 @@ export const api = {
     patch<Category>(`/categories/${id}`, { name, position }),
   deleteCategory: (id: string) => del<{ ok: boolean }>(`/categories/${id}`),
 
-  messages: (channelId: string, params: { before?: string; after?: string; limit?: number } = {}) => {
+  messages: (
+    channelId: string,
+    params: { before?: string; after?: string; around?: string; limit?: number } = {},
+  ) => {
     const query = new URLSearchParams()
     if (params.before) query.set('before', params.before)
     if (params.after) query.set('after', params.after)
+    if (params.around) query.set('around', params.around)
     if (params.limit) query.set('limit', String(params.limit))
     const suffix = query.toString() ? `?${query}` : ''
     return get<Message[]>(`/channels/${channelId}/messages${suffix}`)
@@ -210,6 +214,29 @@ export const api = {
     }>(`/voice/${channelId}/token`),
   voiceStates: () => get<VoiceState[]>('/voice/states'),
   forceDisconnect: (userId: string) => post<{ ok: boolean }>(`/voice/disconnect/${userId}`),
+
+  // --- notifications ---
+  pushKey: () => get<{ enabled: boolean; public_key: string }>('/push/key'),
+  pushSubscribe: (payload: {
+    endpoint: string
+    p256dh: string
+    auth: string
+    user_agent: string
+  }) => post<{ ok: boolean }>('/push/subscribe', payload),
+  pushUnsubscribe: (endpoint: string) => post<{ ok: boolean }>('/push/unsubscribe', { endpoint }),
+  pushTest: () => post<{ ok: boolean }>('/push/test'),
+  notificationPreferences: () => get<NotificationPreferences>('/notifications'),
+  updateNotifications: (payload: {
+    mode?: NotificationMode
+    channel_id?: string
+    channel_mode?: NotificationMode | null
+  }) => patch<NotificationPreferences>('/notifications', payload),
+
+  // --- custom emoji ---
+  emojis: () => get<Emoji[]>('/emojis'),
+  createEmoji: (name: string, url: string) => post<Emoji>('/emojis', { name, url }),
+  renameEmoji: (id: string, name: string) => patch<Emoji>(`/emojis/${id}`, { name }),
+  deleteEmoji: (id: string) => del<{ ok: boolean }>(`/emojis/${id}`),
 
   invites: () => get<Invite[]>('/invites'),
   createInvite: (payload: {

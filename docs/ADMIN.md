@@ -29,6 +29,7 @@ sidebar, visible to anyone holding an admin permission.
 | `VIEW_AUDIT_LOG` | Read the audit log |
 | `MANAGE_WEBHOOKS` | Create and delete integrations |
 | `MANAGE_NICKNAMES` | Rename other members |
+| `MANAGE_EMOJI` | Add, rename and delete custom emoji |
 | `ADMINISTRATOR` | Everything, including permissions added in future versions |
 
 ### Rank
@@ -90,6 +91,40 @@ curl -X POST 'https://chat.example.com/webhooks/<id>/<token>' \
 `text` is accepted as an alias for `content`. The `username` field overrides
 the display name per message. The URL is the only credential — anyone with it
 can post, so rotate it by deleting and recreating the webhook.
+
+## Custom emoji
+
+Admin panel → **Emoji**. Upload a square image and give it a name; it becomes
+available everywhere as `:name:` — in messages, in the composer's `:` picker,
+and as a reaction. Renaming is inline: edit the name and click away.
+
+Deleting an emoji leaves existing messages showing `:name:` as plain text, and
+reactions that used it fall back to a placeholder glyph.
+
+## Notifications
+
+Members configure their own notifications under Settings → **Notifications**:
+a global default (everything / mentions only / nothing) plus a per-channel
+override, and a per-device push subscription.
+
+For push to work at all, the instance needs a VAPID keypair in `.env`. Generate
+one with:
+
+```bash
+docker compose run --rm minichat minichat-server generate-vapid
+```
+
+Two behaviours worth knowing when someone reports "notifications don't work":
+
+- **iPhone and iPad** only deliver push to apps added to the Home Screen. In a
+  Safari tab there is no toggle to turn on, and the settings page explains that
+  in place of the button.
+- A notification is **suppressed when a MiniChat window is focused**, because
+  the in-app badge already covers it. To test delivery, use the **Send a test**
+  button and then switch away from the window.
+
+Muting a channel mutes it completely — mentions included. That is deliberate:
+if muting didn't silence mentions, it wouldn't really be muting.
 
 ## Audit log
 

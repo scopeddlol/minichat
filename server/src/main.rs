@@ -5,10 +5,13 @@ mod error;
 mod gateway;
 mod ids;
 mod livekit;
+mod mentions;
 mod models;
 mod perms;
+mod push;
 mod routes;
 mod state;
+mod sweeper;
 mod validate;
 
 use axum::extract::DefaultBodyLimit;
@@ -30,6 +33,16 @@ use state::AppState;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
+
+    // `minichat-server generate-vapid` prints a fresh Web Push keypair. Runs
+    // before config loading so it works without a populated .env.
+    if std::env::args().nth(1).as_deref() == Some("generate-vapid") {
+        let (public, private) = push::generate_vapid_keypair();
+        println!("# Add these to your .env, then restart:");
+        println!("VAPID_PUBLIC_KEY={public}");
+        println!("VAPID_PRIVATE_KEY={private}");
+        return Ok(());
+    }
 
     tracing_subscriber::registry()
         .with(
@@ -110,6 +123,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             header::CACHE_CONTROL,
             HeaderValue::from_static("public, max-age=31536000, immutable"),
         ));
+
+    sweeper::spawn(state.clone());
 
     let app = Router::new()
         .nest("/api", routes::api_router())
