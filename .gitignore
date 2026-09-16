@@ -1,0 +1,19 @@
+# Secrets and local state
+.env
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Build output
+node_modules/
+dist/
+target/
+desktop/target/
+desktop/gen/
+
+# Editors and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp

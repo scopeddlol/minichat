@@ -1,0 +1,71 @@
+# MiniChat — self-hosted voice, video and text chat.
+#
+#   1. cp .env.example .env
+#   2. Fill in DOMAIN and the generated secrets (see the comments in .env.example)
+#   3. docker compose up -d
+#   4. Open https://<DOMAIN> and walk through the setup wizard.
+#
+# Caddy obtains and renews TLS certificates automatically. HTTPS is not
+# optional here: browsers refuse microphone and camera access without it.
+
+name: minichat
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      LIVEKIT_DOMAIN: ${LIVEKIT_DOMAIN:?set LIVEKIT_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - minichat
+      - livekit
+
+  minichat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: minichat:latest
+    restart: unless-stopped
+    environment:
+      PUBLIC_URL: https://${DOMAIN}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      LIVEKIT_URL: wss://${LIVEKIT_DOMAIN}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in .env}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in .env}
+      RUST_LOG: ${RUST_LOG:-minichat_server=info,tower_http=warn}
+    volumes:
+      - minichat_data:/data
+    expose:
+      - "8080"
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    environment:
+      # LiveKit reads its API keys from this variable as "key: secret" pairs.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      # Media traffic bypasses Caddy and talks to LiveKit directly.
+      - "7881:7881"                       # WebRTC over TCP (restrictive networks)
+      - "50000-50200:50000-50200/udp"     # WebRTC media
+    expose:
+      - "7880"
+
+volumes:
+  minichat_data:
+  caddy_data:
+  caddy_config:

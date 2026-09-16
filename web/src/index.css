@@ -1,0 +1,377 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Every surface colour is a variable so the instance accent
+   (set by the operator during setup) can retint the whole app at runtime.
+--------------------------------------------------------------------------- */
+@theme {
+  --font-sans: 'Inter var', 'Inter', ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius-card: 14px;
+  --radius-pill: 999px;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Accent — overwritten from the instance settings on boot. */
+  --accent: #5b6ee8;
+  --accent-soft: color-mix(in oklab, var(--accent) 18%, transparent);
+  --accent-glow: color-mix(in oklab, var(--accent) 38%, transparent);
+  --accent-ink: #ffffff;
+
+  /* Surfaces, darkest to lightest. */
+  --bg: #0b0d13;
+  --surface-0: #0f1219;
+  --surface-1: #151924;
+  --surface-2: #1c2130;
+  --surface-3: #252b3d;
+  --border: #242a3a;
+  --border-soft: #1c2131;
+
+  --text: #e8ebf5;
+  --text-muted: #9aa3bd;
+  --text-faint: #6b7590;
+
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 8px 24px -8px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / 0.65);
+}
+
+html.light {
+  color-scheme: light;
+  --bg: #f3f4f8;
+  --surface-0: #ffffff;
+  --surface-1: #f7f8fb;
+  --surface-2: #eef0f6;
+  --surface-3: #e3e6ef;
+  --border: #dde1eb;
+  --border-soft: #e8ebf2;
+  --text: #171a23;
+  --text-muted: #5b6377;
+  --text-faint: #8a92a6;
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow-md: 0 8px 24px -10px rgb(15 23 42 / 0.16);
+  --shadow-lg: 0 24px 60px -20px rgb(15 23 42 / 0.22);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+/* Respect the notch / home indicator on installed mobile PWAs. */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+::selection {
+  background: var(--accent-glow);
+  color: var(--text);
+}
+
+/* --- scrollbars ---------------------------------------------------------- */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 999px;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --- focus --------------------------------------------------------------- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* --- component primitives ------------------------------------------------ */
+@utility surface {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+@utility btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  font-weight: 560;
+  font-size: 0.875rem;
+  padding: 0.55rem 0.95rem;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease,
+    opacity 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  user-select: none;
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@utility btn-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 6px 20px -8px var(--accent-glow);
+}
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 88%, white);
+}
+
+@utility btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+@utility btn-subtle {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.btn-subtle:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+@utility btn-danger {
+  background: color-mix(in oklab, var(--danger) 16%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in oklab, var(--danger) 30%, transparent);
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--danger) 26%, transparent);
+}
+
+@utility input {
+  width: 100%;
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.input::placeholder {
+  color: var(--text-faint);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+@utility label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+
+@utility card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-sm);
+}
+
+/* --- animation ----------------------------------------------------------- */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  70% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease;
+}
+.animate-pop-in {
+  animation: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.speaking-ring {
+  animation: pulse-ring 1.4s ease-out infinite;
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- message content ----------------------------------------------------- */
+.md code {
+  background: var(--surface-3);
+  padding: 0.1rem 0.34rem;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+.md pre {
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  overflow-x: auto;
+  margin: 0.4rem 0;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.84em;
+  line-height: 1.55;
+}
+.md blockquote {
+  border-left: 3px solid var(--surface-3);
+  padding-left: 0.75rem;
+  margin: 0.25rem 0;
+  color: var(--text-muted);
+}
+.md a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.md a:hover {
+  text-decoration: underline;
+}
+.md .mention {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0.05rem 0.3rem;
+  border-radius: 5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.md .mention:hover {
+  background: var(--accent-glow);
+}
+.md .spoiler {
+  background: var(--surface-3);
+  color: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.md .spoiler.revealed {
+  background: var(--surface-2);
+  color: inherit;
+}

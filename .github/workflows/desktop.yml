@@ -1,0 +1,52 @@
+name: Desktop app
+
+# Builds the Windows installers. Tag a release (v1.2.3) to attach them to it,
+# or run the workflow manually to download them as artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+
+      - name: Install the Tauri CLI
+        working-directory: desktop
+        run: npm install
+
+      - name: Build installers
+        working-directory: desktop
+        run: npm run build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: minichat-windows
+          path: |
+            desktop/target/release/bundle/msi/*.msi
+            desktop/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/target/release/bundle/msi/*.msi
+            desktop/target/release/bundle/nsis/*.exe

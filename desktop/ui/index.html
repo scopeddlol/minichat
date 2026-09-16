@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Connect to MiniChat</title>
+    <style>
+      :root {
+        --accent: #5b6ee8;
+        --bg: #0b0d13;
+        --surface: #151924;
+        --surface-input: #0f1219;
+        --border: #242a3a;
+        --text: #e8ebf5;
+        --text-muted: #9aa3bd;
+        --danger: #f87171;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        user-select: none;
+      }
+      .glow {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background: radial-gradient(circle at 50% -10%, rgba(91, 110, 232, 0.22), transparent 62%);
+      }
+      .card {
+        position: relative;
+        width: min(400px, calc(100vw - 48px));
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 32px;
+        box-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.7);
+      }
+      .mark {
+        width: 56px;
+        height: 56px;
+        border-radius: 16px;
+        margin: 0 auto 20px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, #5b6ee8, #8b5cff);
+        box-shadow: 0 12px 34px -12px rgba(124, 92, 255, 0.7);
+      }
+      h1 { font-size: 20px; margin: 0; text-align: center; }
+      p.sub { margin: 8px 0 24px; text-align: center; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+      label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+      input {
+        width: 100%;
+        padding: 11px 13px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--surface-input);
+        color: var(--text);
+        font-size: 14px;
+        font-family: inherit;
+        user-select: text;
+      }
+      input::placeholder { color: #6b7590; }
+      input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91, 110, 232, 0.25); }
+      button {
+        width: 100%;
+        margin-top: 18px;
+        padding: 11px;
+        border: 0;
+        border-radius: 10px;
+        background: var(--accent);
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+        transition: background 0.15s ease, opacity 0.15s ease;
+      }
+      button:hover:not(:disabled) { background: #6b7ded; }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .error { margin-top: 14px; font-size: 13px; color: var(--danger); min-height: 18px; text-align: center; }
+      .hint { margin-top: 20px; font-size: 12px; color: #6b7590; text-align: center; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <div class="glow"></div>
+    <main class="card">
+      <div class="mark">
+        <svg width="28" height="28" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <path d="M22 16.6h20a8.4 8.4 0 0 1 8.4 8.4v10.6a8.4 8.4 0 0 1-8.4 8.4H30.5l-9.8 7v-7H22a8.4 8.4 0 0 1-8.4-8.4V25A8.4 8.4 0 0 1 22 16.6Z" fill="#fff"/>
+          <g fill="#5b6ee8">
+            <circle cx="23" cy="30.3" r="3"/><circle cx="32" cy="30.3" r="3"/><circle cx="41" cy="30.3" r="3"/>
+          </g>
+        </svg>
+      </div>
+
+      <h1>Connect to your instance</h1>
+      <p class="sub">Enter the address your community runs on. It's remembered for next time.</p>
+
+      <form id="form">
+        <label for="url">Instance address</label>
+        <input id="url" name="url" placeholder="chat.example.com" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus />
+        <button id="submit" type="submit">Connect</button>
+      </form>
+
+      <p class="error" id="error"></p>
+      <p class="hint">Ask whoever invited you for the address, or use the link in your invite.</p>
+    </main>
+
+    <script type="module">
+      const invoke = window.__TAURI__?.core?.invoke
+      const form = document.getElementById('form')
+      const input = document.getElementById('url')
+      const submit = document.getElementById('submit')
+      const error = document.getElementById('error')
+
+      // Pre-fill with the last instance so "Switch instance" starts from it.
+      if (invoke) {
+        try {
+          const saved = await invoke('saved_instance')
+          if (saved) input.value = saved
+        } catch {
+          /* first run — nothing saved yet */
+        }
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        error.textContent = ''
+        if (!invoke) {
+          error.textContent = 'This page only works inside the MiniChat desktop app.'
+          return
+        }
+        submit.disabled = true
+        submit.textContent = 'Connecting…'
+        try {
+          await invoke('connect', { url: input.value })
+        } catch (caught) {
+          error.textContent = String(caught)
+          submit.disabled = false
+          submit.textContent = 'Connect'
+        }
+      })
+    </script>
+  </body>
+</html>

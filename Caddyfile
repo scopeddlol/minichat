@@ -1,0 +1,33 @@
+# Automatic HTTPS for the app and the LiveKit signalling endpoint.
+# Caddy provisions and renews Let's Encrypt certificates on its own.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Security headers. The CSP allows the app's own assets plus WebSocket and
+	# media connections to the LiveKit host.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "microphone=(self), camera=(self), display-capture=(self), geolocation=()"
+		-Server
+	}
+
+	# The gateway is a long-lived WebSocket; keep it out of the buffer path.
+	reverse_proxy minichat:8080 {
+		flush_interval -1
+	}
+}
+
+{$LIVEKIT_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy livekit:7880 {
+		flush_interval -1
+	}
+}
