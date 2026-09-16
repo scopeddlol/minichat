@@ -5,6 +5,11 @@
 #   3. docker compose up -d
 #   4. Open https://<DOMAIN> and walk through the setup wizard.
 #
+# The MiniChat image is pulled from GitHub Container Registry, so there is
+# nothing to compile. To build from source instead:
+#
+#   docker compose -f compose.yml -f compose.build.yml up -d --build
+#
 # Caddy obtains and renews TLS certificates automatically. HTTPS is not
 # optional here: browsers refuse microphone and camera access without it.
 
@@ -31,10 +36,9 @@ services:
       - livekit
 
   minichat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: minichat:latest
+    # Multi-architecture (amd64 and arm64), published by .github/workflows/docker.yml.
+    # Pin MINICHAT_TAG in .env to a release like v0.2.0 rather than tracking latest.
+    image: ${MINICHAT_IMAGE:-ghcr.io/scopeddlol/minichat}:${MINICHAT_TAG:-latest}
     restart: unless-stopped
     environment:
       PUBLIC_URL: https://${DOMAIN}

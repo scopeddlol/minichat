@@ -111,7 +111,7 @@ For push to work at all, the instance needs a VAPID keypair in `.env`. Generate
 one with:
 
 ```bash
-docker compose run --rm minichat minichat-server generate-vapid
+docker run --rm ghcr.io/scopeddlol/minichat:latest minichat-server generate-vapid
 ```
 
 Two behaviours worth knowing when someone reports "notifications don't work":

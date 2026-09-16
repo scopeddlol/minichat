@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # ---- 1. Build the web client -------------------------------------------------
-FROM node:22-alpine AS web
+# Pinned to the *build* platform: the output is platform-independent JavaScript,
+# so there is nothing to gain from running this under emulation when
+# cross-building for another architecture.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 WORKDIR /build
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -9,6 +12,7 @@ COPY web/ ./
 RUN npm run build
 
 # ---- 2. Build the Rust server ------------------------------------------------
+# This one produces a native binary, so it must build for the target platform.
 FROM rust:1-bookworm AS server
 WORKDIR /build
 # Compile the dependency graph first so code changes don't rebuild every crate.

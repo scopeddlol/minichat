@@ -55,10 +55,13 @@ requests certificates.
 ### 2. Get the files and write your `.env`
 
 ```bash
-git clone https://github.com/scopeddlol/minichat.git
-cd minichat
-cp .env.example .env
+mkdir minichat && cd minichat
+curl -O https://raw.githubusercontent.com/scopeddlol/minichat/v0.2.0/compose.yml
+curl -o .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.2.0/.env.example
 ```
+
+Two files is all you need — the image is prebuilt, so there's nothing to
+compile and no repository to clone.
 
 Open `.env` and set your two domains, then generate the secrets:
 
@@ -71,7 +74,7 @@ openssl rand -hex 16   # SETUP_TOKEN (optional but recommended)
 For push notifications, generate a VAPID keypair and paste both halves in:
 
 ```bash
-docker compose run --rm minichat minichat-server generate-vapid
+docker run --rm ghcr.io/scopeddlol/minichat:latest minichat-server generate-vapid
 ```
 
 ### 3. Start it
@@ -79,6 +82,10 @@ docker compose run --rm minichat minichat-server generate-vapid
 ```bash
 docker compose up -d
 ```
+
+This pulls `ghcr.io/scopeddlol/minichat`, built for `linux/amd64` and
+`linux/arm64` — so a Raspberry Pi, an ARM VPS and an x86 box all work the same
+way.
 
 Caddy requests certificates on first boot; give it a few seconds. Then open
 **https://chat.example.com** and the setup wizard walks you through:
@@ -100,6 +107,25 @@ optionally a role the invite grants on join. Share the link; they pick a
 username and they're in.
 
 ---
+
+### Pin a version
+
+`.env` defaults to `MINICHAT_TAG=latest`. For anything you rely on, pin a
+release instead, so upgrading is something you choose rather than something a
+restart does to you:
+
+```bash
+MINICHAT_TAG=v0.2.0
+```
+
+### Build from source instead
+
+```bash
+git clone https://github.com/scopeddlol/minichat.git
+cd minichat
+cp .env.example .env
+docker compose -f compose.yml -f compose.build.yml up -d --build
+```
 
 ## Ports
 
@@ -235,11 +261,47 @@ out, and without `LIVEKIT_API_SECRET` voice stops working.
 ## Upgrading
 
 ```bash
-git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-Migrations run automatically at startup. Back up first.
+Migrations run automatically at startup. Back up first. If you build from
+source, `git pull` and add `-f compose.build.yml --build` as above.
+
+## Continuous integration
+
+| Workflow | Runs on | Does |
+|---|---|---|
+| `ci.yml` | every push and PR | `cargo fmt`, Clippy with warnings denied, release build, `tsc`, web build |
+| `docker.yml` | pushes, PRs, `v*` tags | Builds the image for amd64 and arm64, smoke-tests each one, publishes to GHCR |
+| `desktop.yml` | `v*` tags, manual | Builds the Windows installers and attaches them to a draft release |
+
+`docker.yml` builds each architecture on a runner of that architecture rather
+than under emulation, then merges the two into one manifest — an emulated arm64
+Rust build takes roughly thirty minutes, a native one takes the same time as
+amd64. Every build is started, queried over HTTP and checked for a clean
+migration run before it is published, so a broken image never reaches the
+registry.
+
+### Publishing a release
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+That publishes the image as `ghcr.io/scopeddlol/minichat:v0.2.0` (and `:0.2`)
+and opens a **draft** GitHub release with the Windows installers attached, for
+you to review before making it public.
+
+### Making the image public
+
+The first publish creates the GHCR package as **private**, which means
+`docker compose up` fails with `denied` for everyone else. Fix it once, in
+**Package settings → Danger Zone → Change visibility → Public**, at
+`https://github.com/users/scopeddlol/packages/container/minichat/settings`.
+While it's private, pulling needs `docker login ghcr.io` with a token that has
+`read:packages`.
 
 ---
 
