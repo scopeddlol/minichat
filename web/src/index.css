@@ -76,6 +76,13 @@ body,
   height: 100%;
 }
 
+/* The desktop app runs in a frameless window and draws its own 36px caption
+   bar (<TitleBar />), so the app itself starts below it. Added in main.tsx. */
+html.desktop #root {
+  margin-top: 36px;
+  height: calc(100% - 36px);
+}
+
 body {
   margin: 0;
   background: var(--bg);

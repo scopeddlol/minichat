@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Auth from './routes/Auth'
 import Chat from './routes/Chat'
 import Setup from './routes/Setup'
+import TitleBar from './components/TitleBar'
 import { ConfirmProvider, Spinner, ToastViewport } from './components/ui'
 import { applyTheme, effectiveTheme } from './lib/theme'
 import { useStore } from './lib/store'
@@ -32,6 +33,10 @@ export default function App() {
 
   return (
     <ConfirmProvider>
+      {/* Desktop only: the Tauri window is frameless, so MiniChat draws the
+          caption bar itself. `html.desktop` in index.css makes room for it. */}
+      <TitleBar />
+
       {phase === 'loading' && (
         <div className="h-full flex items-center justify-center" style={{ color: 'var(--text-faint)' }}>
           <Spinner size={24} />

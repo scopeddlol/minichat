@@ -1,12 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core permissions for the local connect screen, plus global shortcuts for voice hotkeys. Remote instance pages deliberately get no IPC access.",
+  "description": "Permissions for the bundled connect screen. core:default covers the window getters but not the window controls, so the four the connect screen's titlebar actually uses are listed explicitly. The connected instance is a remote origin and gets nothing from here: it is granted its own capability at runtime, scoped to that origin and to window controls alone (see grant_instance_ipc in src/main.rs).",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close"
   ]
 }

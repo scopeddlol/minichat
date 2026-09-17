@@ -4,6 +4,7 @@ import {
   DEFAULT_BINDINGS, isBindingComplete, keyFromEvent, loadBindings, saveBindings,
   type HotkeyBindings,
 } from '../../lib/hotkeys'
+import { isDesktopApp } from '../../lib/desktop'
 import { useStore } from '../../lib/store'
 import { useVoice } from '../../lib/voice'
 import Select from '../Select'
@@ -48,7 +49,6 @@ export default function VoiceSettings() {
     saveBindings(next)
   }
 
-  const isDesktop = navigator.userAgent.includes('MiniChat')
 
   const voiceMembers = Object.values(members).filter((member) => member.id !== useStore.getState().me?.id)
 
@@ -121,7 +121,7 @@ export default function VoiceSettings() {
           onChange={(value) => update({ enabled: value })}
           label="Enable voice hotkeys"
           hint={
-            isDesktop
+            isDesktopApp
               ? 'In the desktop app these also work while MiniChat is in the background.'
               : 'In a browser these only work while the MiniChat window is focused.'
           }
@@ -177,7 +177,7 @@ export default function VoiceSettings() {
               />
             </div>
 
-            {!isDesktop && (
+            {!isDesktopApp && (
               <p
                 className="text-xs p-2.5 rounded-lg leading-relaxed flex gap-2"
                 style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}

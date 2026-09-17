@@ -20,6 +20,8 @@
       body {
         margin: 0;
         min-height: 100vh;
+        /* Leaves room for the titlebar so the card centres in what's left. */
+        padding-top: 36px;
         display: grid;
         place-items: center;
         background: var(--bg);
@@ -28,6 +30,49 @@
         -webkit-font-smoothing: antialiased;
         user-select: none;
       }
+
+      /* The window is frameless, so the titlebar is ours to draw. Kept in
+         step with the web app's <TitleBar /> so switching from the connect
+         screen to an instance doesn't visibly change the chrome. */
+      .titlebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 36px;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-left: 12px;
+        background: rgba(11, 13, 19, 0.72);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border);
+      }
+      .titlebar .name {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: var(--text-muted);
+      }
+      .titlebar .spacer { flex: 1; align-self: stretch; }
+      .controls { display: flex; align-self: stretch; }
+      .controls button {
+        width: 46px;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--text-muted);
+        display: grid;
+        place-items: center;
+        cursor: default;
+        transition: background 0.12s ease, color 0.12s ease;
+      }
+      .controls button:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+      .controls button.close:hover { background: #e81123; color: #fff; }
       .glow {
         position: fixed;
         inset: 0;
@@ -69,7 +114,7 @@
       }
       input::placeholder { color: #6b7590; }
       input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91, 110, 232, 0.25); }
-      button {
+      .card button {
         width: 100%;
         margin-top: 18px;
         padding: 11px;
@@ -83,13 +128,32 @@
         cursor: pointer;
         transition: background 0.15s ease, opacity 0.15s ease;
       }
-      button:hover:not(:disabled) { background: #6b7ded; }
-      button:disabled { opacity: 0.6; cursor: default; }
+      .card button:hover:not(:disabled) { background: #6b7ded; }
+      .card button:disabled { opacity: 0.6; cursor: default; }
       .error { margin-top: 14px; font-size: 13px; color: var(--danger); min-height: 18px; text-align: center; }
       .hint { margin-top: 20px; font-size: 12px; color: #6b7590; text-align: center; line-height: 1.5; }
     </style>
   </head>
   <body>
+    <div class="titlebar" data-tauri-drag-region="deep">
+      <svg width="14" height="14" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <path d="M22 16.6h20a8.4 8.4 0 0 1 8.4 8.4v10.6a8.4 8.4 0 0 1-8.4 8.4H30.5l-9.8 7v-7H22a8.4 8.4 0 0 1-8.4-8.4V25A8.4 8.4 0 0 1 22 16.6Z" fill="#7c8cf0"/>
+      </svg>
+      <span class="name">MiniChat</span>
+      <div class="spacer" data-tauri-drag-region="deep"></div>
+      <div class="controls">
+        <button id="win-min" type="button" title="Minimise" aria-label="Minimise">
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button id="win-max" type="button" title="Maximise" aria-label="Maximise">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button id="win-close" class="close" type="button" title="Close" aria-label="Close">
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+      </div>
+    </div>
+
     <div class="glow"></div>
     <main class="card">
       <div class="mark">
@@ -119,6 +183,41 @@
       // by Tauri before page scripts run, but looking it up lazily means a
       // slow injection can never leave the button permanently dead.
       const getInvoke = () => window.__TAURI__?.core?.invoke
+
+      // Window controls. `getCurrentWindow` is available because the connect
+      // screen is local content covered by capabilities/default.json.
+      const currentWindow = () => window.__TAURI__?.window?.getCurrentWindow?.()
+      const onClick = (id, run) => {
+        document.getElementById(id).addEventListener('click', () => {
+          const win = currentWindow()
+          if (win) void run(win)
+        })
+      }
+      onClick('win-min', (win) => win.minimize())
+      onClick('win-max', (win) => win.toggleMaximize())
+      onClick('win-close', (win) => win.close())
+
+      // Swap the maximise glyph for a restore glyph, including when the window
+      // was maximised by a snap gesture or a keyboard shortcut. A maximise
+      // always resizes, so `resize` is the one signal that catches every case.
+      const MAXIMISE = '<path d="M0.5 0.5h9v9h-9z" fill="none" stroke="currentColor" stroke-width="1"/>'
+      const RESTORE =
+        '<path d="M2 3h6v6H2z" fill="none" stroke="currentColor" stroke-width="1"/>' +
+        '<path d="M3.5 3V1.5h6v6H8" fill="none" stroke="currentColor" stroke-width="1"/>'
+      const syncMaximised = async () => {
+        const win = currentWindow()
+        if (!win) return
+        try {
+          const maximised = await win.isMaximized()
+          const button = document.getElementById('win-max')
+          button.querySelector('svg').innerHTML = maximised ? RESTORE : MAXIMISE
+          button.title = button.ariaLabel = maximised ? 'Restore' : 'Maximise'
+        } catch {
+          /* leave the glyph as it is */
+        }
+      }
+      window.addEventListener('resize', syncMaximised)
+      void syncMaximised()
 
       const form = document.getElementById('form')
       const input = document.getElementById('url')

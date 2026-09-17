@@ -56,8 +56,8 @@ requests certificates.
 
 ```bash
 mkdir minichat && cd minichat
-curl -O https://raw.githubusercontent.com/scopeddlol/minichat/v0.2.1/compose.yml
-curl -o .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.2.1/.env.example
+curl -O https://raw.githubusercontent.com/scopeddlol/minichat/v0.3.0/compose.yml
+curl -o .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.3.0/.env.example
 ```
 
 Two files is all you need — the image is prebuilt, so there's nothing to
@@ -115,7 +115,7 @@ release instead, so upgrading is something you choose rather than something a
 restart does to you:
 
 ```bash
-MINICHAT_TAG=v0.2.1
+MINICHAT_TAG=v0.3.0
 ```
 
 ### Build from source instead
@@ -173,7 +173,7 @@ npm run build
 ```
 
 On first launch the app asks for your instance address and remembers it.
-**File → Switch instance…** changes it later.
+Right-click the tray icon → **Switch instance…** changes it later.
 
 If the connect screen says it can't reach the app's internals, the build was
 made without `withGlobalTauri` enabled in `desktop/tauri.conf.json` — the
@@ -184,7 +184,53 @@ The desktop app also registers **global voice hotkeys**, so push-to-talk works
 while you're in a game or another window — something a browser tab fundamentally
 cannot do. Defaults are `F8` (push to talk), `F9` (mute) and `F10` (deafen);
 change them in `settings.json` inside the app's config directory, or turn them
-off from **File → Toggle global voice hotkeys**.
+off from the tray menu.
+
+#### What makes it feel native
+
+The window is **frameless**. There is no Windows caption bar and no menu strip;
+MiniChat draws its own titlebar, and the tray icon carries the menu. Closing
+the window **hides it to the tray** rather than quitting — left-click the tray
+icon to bring it back, or **Quit MiniChat** to exit for real. Turn the
+behaviour off with **Close to tray** in the same menu.
+
+WebView2 normally asks before handing a page your camera or microphone. The
+app **answers that prompt itself** for the instance it is connected to, so
+joining voice takes one click rather than two. Only the microphone, camera,
+notification and clipboard-read prompts are answered, and only for that
+instance's origin — anything else still asks.
+
+Driving a frameless window means the page needs a little IPC, which is granted
+at runtime and scoped: the connected origin gets the six window commands
+listed in `INSTANCE_WINDOW_PERMISSIONS` (`desktop/src/main.rs`) and nothing
+else — no filesystem, no shell, no process. A different instance gets its own
+grant; any other page gets none.
+
+One thing the desktop app cannot yet remove is the **screen-picker dialog**
+when you start sharing. That window belongs to WebView2, not to MiniChat, and
+a page can't replace it. Quality and frame rate are chosen in MiniChat's own
+dialog first (see **Screen sharing** below); the picker only chooses *what* to
+share.
+
+### Screen sharing
+
+Starting a share opens MiniChat's own dialog first: **resolution** (480p, 720p,
+1080p, 1440p or your display's native size), **frame rate** (15, 30 or 60 fps),
+whether to optimise for **motion or detail**, which tab of the picker to open
+on, and whether to include **audio**. It shows the bitrate the combination
+works out to, so 1440p60 reads as the several-megabits choice it is before you
+pick it.
+
+Sensible pairs: 720p15 for a slide or a document, 1080p30 for general use,
+1080p60 or 1440p60 for a game if your upload can carry it. **Motion** keeps
+frames smooth and lets the picture soften when bandwidth tightens; **Detail**
+keeps code and text sharp and drops frames instead.
+
+MiniChat draws nothing on the shared surface, and the share excludes the
+MiniChat window itself, so picking your whole screen does not produce a hall
+of mirrors. In a *browser* you also get that browser's own "you're sharing"
+indicator — page content can't remove it, and shouldn't be able to. The
+desktop app has no such bar.
 
 ---
 
@@ -291,11 +337,11 @@ registry.
 ### Publishing a release
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
-That publishes the image as `ghcr.io/scopeddlol/minichat:v0.2.1` (and `:0.2`)
+That publishes the image as `ghcr.io/scopeddlol/minichat:v0.3.0` (and `:0.3`)
 and opens a **draft** GitHub release with the Windows installers attached, for
 you to review before making it public.
 

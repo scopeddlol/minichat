@@ -1,6 +1,6 @@
 [package]
 name = "minichat-desktop"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "MiniChat desktop client"
 authors = ["MiniChat"]
@@ -10,10 +10,18 @@ rust-version = "1.82"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# WebView2 interop, used to answer the camera/microphone permission prompt
+# ourselves instead of showing it. Both versions must stay in step with the
+# ones Tauri resolves (`cargo tree -p webview2-com -p windows`) or two
+# incompatible copies of the COM types end up in the build.
+[target."cfg(windows)".dependencies]
+webview2-com = "0.38"
+windows = "0.61"
 
 [profile.release]
 opt-level = "s"

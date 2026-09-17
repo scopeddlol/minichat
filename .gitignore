@@ -17,3 +17,6 @@ desktop/gen/
 .idea/
 .vscode/
 *.swp
+
+# Incremental build caches
+*.tsbuildinfo

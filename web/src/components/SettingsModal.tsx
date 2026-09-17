@@ -5,6 +5,7 @@ import {
 import { useEffect, useState } from 'react'
 import { api, ApiError, setToken } from '../lib/api'
 import { formatBytes } from '../lib/format'
+import { isDesktopApp } from '../lib/desktop'
 import type { DesktopRelease } from '../lib/types'
 import { useStore } from '../lib/store'
 import { clearThemeOverride, setTheme, storedTheme, type ThemeChoice } from '../lib/theme'
@@ -547,7 +548,6 @@ function AboutTab({ onClose }: { onClose: () => void }) {
   }, [])
 
   const isWindows = navigator.userAgent.includes('Windows')
-  const isDesktopApp = navigator.userAgent.includes('MiniChat')
 
   return (
     <div className="space-y-5 animate-fade-in">
