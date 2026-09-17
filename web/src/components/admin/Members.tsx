@@ -5,6 +5,7 @@ import { formatFullDate, formatRelative } from '../../lib/format'
 import { can, P } from '../../lib/perms'
 import { useStore } from '../../lib/store'
 import type { BanEntry } from '../../lib/types'
+import Select from '../Select'
 import { Avatar, Badge, toast, useConfirm } from '../ui'
 
 export default function Members({ onOpenProfile }: { onOpenProfile: (userId: string) => void }) {
@@ -62,14 +63,16 @@ export default function Members({ onOpenProfile }: { onOpenProfile: (userId: str
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
-        <select className="input !w-auto" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
-          <option value="">All roles</option>
-          {roles.map((role) => (
-            <option key={role.id} value={role.id}>
-              {role.name}
-            </option>
-          ))}
-        </select>
+        <Select
+          width="auto"
+          value={roleFilter}
+          onChange={setRoleFilter}
+          ariaLabel="Filter by role"
+          options={[
+            { value: '', label: 'All roles' },
+            ...roles.map((role) => ({ value: role.id, label: role.name, swatch: role.color })),
+          ]}
+        />
         {canBan && (
           <button
             className={`btn ${showBans ? 'btn-primary' : 'btn-subtle'}`}

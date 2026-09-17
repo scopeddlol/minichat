@@ -40,6 +40,16 @@ pub struct UpdateInstanceInput {
     pub default_role_id: Option<String>,
     pub system_channel_id: Option<Option<String>>,
     pub max_upload_mb: Option<i64>,
+    // --- theming ---
+    pub theme_mode: Option<String>,
+    pub surface_tint: Option<String>,
+    pub corner_radius: Option<i64>,
+    pub font_family: Option<String>,
+    pub custom_css: Option<String>,
+    // --- the pages outsiders see ---
+    pub login_headline: Option<String>,
+    pub login_body: Option<String>,
+    pub login_image_url: Option<String>,
 }
 
 pub async fn update_instance(
@@ -105,10 +115,51 @@ pub async fn update_instance(
         instance.max_upload_mb = v.clamp(1, 500);
     }
 
+    if let Some(v) = &input.theme_mode {
+        if !matches!(v.as_str(), "dark" | "light" | "system") {
+            return Err(AppError::bad("Unknown theme."));
+        }
+        instance.theme_mode = v.clone();
+    }
+    if let Some(v) = &input.surface_tint {
+        instance.surface_tint = if v.trim().is_empty() {
+            None
+        } else {
+            Some(validate::color(v)?)
+        };
+    }
+    if let Some(v) = input.corner_radius {
+        instance.corner_radius = v.clamp(0, 28);
+    }
+    if let Some(v) = &input.font_family {
+        // A font stack, not arbitrary CSS: it is interpolated into a custom
+        // property, so quotes and braces have no business here.
+        let font = validate::optional_text(v, "Font", 120)?;
+        if font.contains([';', '{', '}', '<', '>']) {
+            return Err(AppError::bad("That font name contains invalid characters."));
+        }
+        instance.font_family = font;
+    }
+    if let Some(v) = &input.custom_css {
+        instance.custom_css = validate::optional_text(v, "Custom CSS", 20_000)?;
+    }
+    if let Some(v) = &input.login_headline {
+        instance.login_headline = validate::optional_text(v, "Headline", 120)?;
+    }
+    if let Some(v) = &input.login_body {
+        instance.login_body = validate::optional_text(v, "Body text", 600)?;
+    }
+    if let Some(v) = &input.login_image_url {
+        instance.login_image_url = validate::safe_url(v, "Login image")?;
+    }
+
     sqlx::query(
         "UPDATE instance SET name = ?, tagline = ?, description = ?, icon_url = ?, banner_url = ?,
                 accent_color = ?, rules = ?, welcome_message = ?, registration_mode = ?,
-                require_rules_accept = ?, default_role_id = ?, system_channel_id = ?, max_upload_mb = ?
+                require_rules_accept = ?, default_role_id = ?, system_channel_id = ?,
+                max_upload_mb = ?, theme_mode = ?, surface_tint = ?, corner_radius = ?,
+                font_family = ?, custom_css = ?, login_headline = ?, login_body = ?,
+                login_image_url = ?
          WHERE id = 1",
     )
     .bind(&instance.name)
@@ -285,6 +336,9 @@ pub struct RoleInput {
     pub position: Option<i64>,
     pub hoist: Option<bool>,
     pub mentionable: Option<bool>,
+    pub icon_url: Option<String>,
+    /// A short text badge shown beside the name, e.g. "MOD".
+    pub badge: Option<String>,
 }
 
 pub async fn create_role(
@@ -389,9 +443,16 @@ pub async fn update_role(
     if let Some(mentionable) = input.mentionable {
         role.mentionable = mentionable;
     }
+    if let Some(icon_url) = &input.icon_url {
+        role.icon_url = validate::safe_url(icon_url, "Role icon")?;
+    }
+    if let Some(badge) = &input.badge {
+        role.badge = validate::optional_text(badge, "Badge", 8)?;
+    }
 
     sqlx::query(
-        "UPDATE roles SET name = ?, color = ?, permissions = ?, position = ?, hoist = ?, mentionable = ?
+        "UPDATE roles SET name = ?, color = ?, permissions = ?, position = ?, hoist = ?,
+                mentionable = ?, icon_url = ?, badge = ?
          WHERE id = ?",
     )
     .bind(&role.name)
@@ -400,6 +461,8 @@ pub async fn update_role(
     .bind(role.position)
     .bind(role.hoist)
     .bind(role.mentionable)
+    .bind(&role.icon_url)
+    .bind(&role.badge)
     .bind(&id)
     .execute(&state.db)
     .await?;

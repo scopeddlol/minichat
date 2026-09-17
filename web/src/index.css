@@ -22,14 +22,17 @@
   --accent-glow: color-mix(in oklab, var(--accent) 38%, transparent);
   --accent-ink: #ffffff;
 
-  /* Surfaces, darkest to lightest. */
-  --bg: #0b0d13;
-  --surface-0: #0f1219;
-  --surface-1: #151924;
-  --surface-2: #1c2130;
-  --surface-3: #252b3d;
-  --border: #242a3a;
-  --border-soft: #1c2131;
+  /* Surfaces, darkest to lightest.
+     Each is mixed against --tint, which the instance may set to give the whole
+     app a warm or cool cast. Unset, every mix resolves to its own base. */
+  --tint-strength: 12%;
+  --bg: color-mix(in oklab, #0b0d13 calc(100% - var(--tint-strength)), var(--tint, #0b0d13));
+  --surface-0: color-mix(in oklab, #0f1219 calc(100% - var(--tint-strength)), var(--tint, #0f1219));
+  --surface-1: color-mix(in oklab, #151924 calc(100% - var(--tint-strength)), var(--tint, #151924));
+  --surface-2: color-mix(in oklab, #1c2130 calc(100% - var(--tint-strength)), var(--tint, #1c2130));
+  --surface-3: color-mix(in oklab, #252b3d calc(100% - var(--tint-strength)), var(--tint, #252b3d));
+  --border: color-mix(in oklab, #242a3a calc(100% - var(--tint-strength)), var(--tint, #242a3a));
+  --border-soft: color-mix(in oklab, #1c2131 calc(100% - var(--tint-strength)), var(--tint, #1c2131));
 
   --text: #e8ebf5;
   --text-muted: #9aa3bd;
@@ -46,13 +49,15 @@
 
 html.light {
   color-scheme: light;
-  --bg: #f3f4f8;
-  --surface-0: #ffffff;
-  --surface-1: #f7f8fb;
-  --surface-2: #eef0f6;
-  --surface-3: #e3e6ef;
-  --border: #dde1eb;
-  --border-soft: #e8ebf2;
+  /* Light surfaces need a lighter touch — the same strength reads muddy. */
+  --tint-strength: 7%;
+  --bg: color-mix(in oklab, #f3f4f8 calc(100% - var(--tint-strength)), var(--tint, #f3f4f8));
+  --surface-0: color-mix(in oklab, #ffffff calc(100% - var(--tint-strength)), var(--tint, #ffffff));
+  --surface-1: color-mix(in oklab, #f7f8fb calc(100% - var(--tint-strength)), var(--tint, #f7f8fb));
+  --surface-2: color-mix(in oklab, #eef0f6 calc(100% - var(--tint-strength)), var(--tint, #eef0f6));
+  --surface-3: color-mix(in oklab, #e3e6ef calc(100% - var(--tint-strength)), var(--tint, #e3e6ef));
+  --border: color-mix(in oklab, #dde1eb calc(100% - var(--tint-strength)), var(--tint, #dde1eb));
+  --border-soft: color-mix(in oklab, #e8ebf2 calc(100% - var(--tint-strength)), var(--tint, #e8ebf2));
   --text: #171a23;
   --text-muted: #5b6377;
   --text-faint: #8a92a6;

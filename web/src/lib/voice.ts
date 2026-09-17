@@ -11,6 +11,10 @@ import {
 import { create } from 'zustand'
 import { api } from './api'
 import { gateway } from './gateway'
+import {
+  captureOptions, loadScreenShareSettings, publishOptions, saveScreenShareSettings,
+  type ScreenShareSettings,
+} from './screenshare'
 import { useStore } from './store'
 
 export interface VoiceParticipant {
@@ -83,6 +87,8 @@ interface VoiceStore {
   volumes: Record<string, number>
   /** True while push-to-talk is holding the microphone open. */
   pushToTalkActive: boolean
+  /** Capture quality for the next screen share. */
+  screenShare: ScreenShareSettings
 
   join: (channelId: string) => Promise<void>
   leave: () => Promise<void>
@@ -95,6 +101,9 @@ interface VoiceStore {
   selectDevice: (kind: keyof DeviceSelection, deviceId: string) => Promise<void>
   setUserVolume: (userId: string, volume: number) => void
   setPushToTalk: (active: boolean) => void
+  setScreenShareSettings: (settings: Partial<ScreenShareSettings>) => void
+  startScreenShare: () => Promise<void>
+  stopScreenShare: () => Promise<void>
 }
 
 const trackKey = (identity: string, source: Track.Source) => `${identity}:${source}`
@@ -127,6 +136,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   }),
   volumes: loadJson<Record<string, number>>(VOLUME_STORAGE_KEY, {}),
   pushToTalkActive: false,
+  screenShare: loadScreenShareSettings(),
 
   async join(channelId) {
     if (get().connecting) return
@@ -283,17 +293,54 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   },
 
   async toggleScreenShare() {
-    const { room, screenSharing, canScreenShare, channelId } = get()
+    if (get().screenSharing) await get().stopScreenShare()
+    else await get().startScreenShare()
+  },
+
+  setScreenShareSettings(patch) {
+    const settings = { ...get().screenShare, ...patch }
+    set({ screenShare: settings })
+    saveScreenShareSettings(settings)
+  },
+
+  /**
+   * Begin sharing at the chosen quality.
+   *
+   * The browser's source picker appears after this call — it is the gate that
+   * makes screen capture safe, and a page cannot replace it.
+   */
+  async startScreenShare() {
+    const { room, canScreenShare, channelId, screenShare } = get()
     if (!room || !canScreenShare) return
-    const next = !screenSharing
     try {
-      await room.localParticipant.setScreenShareEnabled(next, { audio: true })
-      set({ screenSharing: next })
-      if (channelId) publishVoiceState(channelId, { ...get(), screenSharing: next })
-    } catch {
-      // The user dismissing the picker is not an error worth surfacing.
-      set({ screenSharing: false })
+      await room.localParticipant.setScreenShareEnabled(
+        true,
+        captureOptions(screenShare),
+        publishOptions(screenShare),
+      )
+      set({ screenSharing: true })
+      if (channelId) publishVoiceState(channelId, { ...get(), screenSharing: true })
+    } catch (error) {
+      // Dismissing the picker throws NotAllowedError; that's a choice, not a
+      // fault, so it shouldn't raise an error banner.
+      const name = (error as { name?: string })?.name
+      set({
+        screenSharing: false,
+        error: name === 'NotAllowedError' ? '' : 'Could not start sharing your screen.',
+      })
     }
+  },
+
+  async stopScreenShare() {
+    const { room, channelId } = get()
+    set({ screenSharing: false })
+    if (!room) return
+    try {
+      await room.localParticipant.setScreenShareEnabled(false)
+    } catch {
+      /* already stopped */
+    }
+    if (channelId) publishVoiceState(channelId, { ...get(), screenSharing: false })
   },
 
   setFocus(identity) {

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { api, ApiError, getToken, setToken } from './api'
 import { gateway, type GatewayEvent, type GatewayStatus } from './gateway'
 import { toBits } from './perms'
+import { applyBranding, applyMetaBranding } from './theme'
 import type {
   Category, Channel, Emoji, Instance, InstanceMeta, Me, Member, Message,
   NotificationPreferences, Role, VoiceState,
@@ -128,7 +129,7 @@ export const useStore = create<AppState>((set, get) => ({
   async boot() {
     try {
       const meta = await api.meta()
-      applyAccent(meta.accent_color)
+      applyMetaBranding(meta)
       set({ meta })
 
       if (!meta.setup_complete) {
@@ -166,7 +167,7 @@ export const useStore = create<AppState>((set, get) => ({
   async finishAuth(token: string) {
     setToken(token)
     const meta = await api.meta()
-    applyAccent(meta.accent_color)
+    applyMetaBranding(meta)
     set({ meta, phase: 'ready' })
     gateway.connect()
   },
@@ -333,7 +334,7 @@ export const useStore = create<AppState>((set, get) => ({
           lastRead[entry.channel_id] = entry.last_read_id
         }
 
-        applyAccent(d.instance.accent_color)
+        applyBranding(d.instance)
         const channels = sortChannels(d.channels)
         const channelPermissions: Record<string, bigint> = {}
         for (const [id, bits] of Object.entries(
@@ -614,7 +615,7 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       case 'INSTANCE_UPDATE': {
-        applyAccent(d.accent_color)
+        applyBranding(d as Instance)
         set({ instance: d as Instance })
         break
       }
@@ -705,19 +706,6 @@ function schedulePermissionRefresh() {
     permissionRefreshTimer = null
     void useStore.getState().refreshChannelPermissions()
   }, 350)
-}
-
-/** Retint the app from a hex accent, deriving the readable foreground. */
-export function applyAccent(hex: string) {
-  if (!/^#[0-9a-f]{6}$/i.test(hex)) return
-  const root = document.documentElement
-  root.style.setProperty('--accent', hex)
-
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  root.style.setProperty('--accent-ink', luminance > 0.62 ? '#10131c' : '#ffffff')
 }
 
 /** Drop typing indicators that have gone stale. */

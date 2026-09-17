@@ -5,7 +5,8 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../lib/api'
 import { P } from '../lib/perms'
-import { applyAccent, useStore } from '../lib/store'
+import { useStore } from '../lib/store'
+import { applyAccent } from '../lib/theme'
 import type { InstanceMeta } from '../lib/types'
 import { ColorField, Field, Switch, toast } from '../components/ui'
 

@@ -4,6 +4,7 @@ import { api, ApiError } from '../../lib/api'
 import { toBits } from '../../lib/perms'
 import { useStore } from '../../lib/store'
 import type { Channel, PermissionDef } from '../../lib/types'
+import Select from '../Select'
 import { ChannelIcon } from '../Sidebar'
 import { Field, Modal, Switch, toast, useConfirm } from '../ui'
 
@@ -39,7 +40,7 @@ export default function Channels() {
                   color: selectedId === channel.id ? 'var(--text)' : 'var(--text-muted)',
                 }}
               >
-                <ChannelIcon kind={channel.kind} isPrivate={channel.is_private} size={14} />
+                <ChannelIcon kind={channel.kind} isPrivate={channel.is_private} emoji={channel.emoji} size={14} />
                 <span className="truncate flex-1">{channel.name}</span>
               </button>
             ))}
@@ -192,6 +193,8 @@ function ChannelEditor({ channel, onDeleted }: { channel: Channel; onDeleted: ()
       await api.updateChannel(channel.id, {
         name: draft.name,
         topic: draft.topic,
+        emoji: draft.emoji,
+        description: draft.description,
         category_id: draft.category_id,
         slowmode: draft.slowmode,
         is_private: draft.is_private,
@@ -210,7 +213,7 @@ function ChannelEditor({ channel, onDeleted }: { channel: Channel; onDeleted: ()
       <section className="card p-5 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-semibold flex items-center gap-2">
-            <ChannelIcon kind={channel.kind} isPrivate={channel.is_private} /> {channel.name}
+            <ChannelIcon kind={channel.kind} isPrivate={channel.is_private} emoji={channel.emoji} /> {channel.name}
           </h3>
           <button
             className="btn btn-danger !py-1.5 !px-2.5"
@@ -240,24 +243,42 @@ function ChannelEditor({ channel, onDeleted }: { channel: Channel; onDeleted: ()
             <input className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </Field>
           <Field label="Category">
-            <select
-              className="input"
+            <Select
               value={draft.category_id ?? ''}
-              onChange={(e) => setDraft({ ...draft, category_id: e.target.value || null })}
-            >
-              <option value="">Uncategorised</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
+              onChange={(next) => setDraft({ ...draft, category_id: next || null })}
+              ariaLabel="Category"
+              options={[
+                { value: '', label: 'Uncategorised' },
+                ...categories.map((category) => ({ value: category.id, label: category.name })),
+              ]}
+            />
           </Field>
         </div>
 
         <Field label="Topic" hint="Shown in the channel header.">
           <input className="input" value={draft.topic} onChange={(e) => setDraft({ ...draft, topic: e.target.value })} />
         </Field>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="Emoji" hint="Replaces the # or speaker icon in the sidebar.">
+            <input
+              className="input"
+              value={draft.emoji}
+              maxLength={8}
+              onChange={(e) => setDraft({ ...draft, emoji: e.target.value })}
+              placeholder="🎮"
+            />
+          </Field>
+          <Field label="Sidebar description" hint="A short line under the channel name.">
+            <input
+              className="input"
+              value={draft.description}
+              maxLength={100}
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              placeholder="where the plans happen"
+            />
+          </Field>
+        </div>
 
         {channel.kind === 'voice' ? (
           <Field label="User limit" hint="0 means unlimited.">
@@ -306,14 +327,17 @@ function ChannelEditor({ channel, onDeleted }: { channel: Channel; onDeleted: ()
         </p>
 
         <Field label="Role">
-          <select className="input" value={permRole} onChange={(e) => setPermRole(e.target.value)}>
-            {roles.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.name}
-                {role.is_default ? ' (default)' : ''}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={permRole}
+            onChange={setPermRole}
+            ariaLabel="Role"
+            options={roles.map((role) => ({
+              value: role.id,
+              label: role.name,
+              hint: role.is_default ? 'default role' : undefined,
+              swatch: role.color,
+            }))}
+          />
         </Field>
 
         <div className="mt-4 space-y-1">
@@ -456,14 +480,15 @@ export function CreateChannelModal({
         </Field>
 
         <Field label="Category">
-          <select className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">Uncategorised</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={categoryId}
+            onChange={setCategoryId}
+            ariaLabel="Category"
+            options={[
+              { value: '', label: 'Uncategorised' },
+              ...categories.map((category) => ({ value: category.id, label: category.name })),
+            ]}
+          />
         </Field>
 
         <Switch

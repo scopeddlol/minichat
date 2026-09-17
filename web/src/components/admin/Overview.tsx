@@ -8,9 +8,14 @@ import { Spinner, copyText } from '../ui'
 export default function Overview() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [error, setError] = useState('')
+  // Fourteen bars plus labels is unreadable on a phone; a week fits.
+  const [days, setDays] = useState(() => (window.innerWidth < 520 ? 7 : 14))
 
   useEffect(() => {
     api.stats().then(setStats).catch((e) => setError(e.message))
+    const onResize = () => setDays(window.innerWidth < 520 ? 7 : 14)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
   if (error) return <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>
@@ -23,7 +28,7 @@ export default function Overview() {
 
   // Zero-fill the window so a quiet instance shows a real 14-day series
   // rather than one bar stretched across the whole chart.
-  const series = buildSeries(stats.activity, 14)
+  const series = buildSeries(stats.activity, days)
   const peak = Math.max(1, ...series.map((point) => point.count))
 
   return (
@@ -62,8 +67,11 @@ export default function Overview() {
                     opacity: point.count ? 0.7 : 1,
                   }}
                 />
-                <span className="text-[0.58rem] truncate w-full text-center" style={{ color: 'var(--text-faint)' }}>
-                  {point.day.slice(5).replace('-', '/')}
+                <span
+                  className="text-[0.58rem] w-full text-center tabular-nums"
+                  style={{ color: 'var(--text-faint)' }}
+                >
+                  {point.day.slice(8)}
                 </span>
               </div>
             ))}

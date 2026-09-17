@@ -1,6 +1,7 @@
 mod access;
 mod auth;
 mod config;
+mod desktop;
 mod error;
 mod gateway;
 mod ids;
@@ -131,6 +132,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest("/webhooks", routes::webhook_router())
         .nest_service("/uploads", uploads)
         .nest_service("/assets", assets)
+        .route(
+            "/manifest.webmanifest",
+            axum::routing::get(routes::instance::manifest),
+        )
         .route("/healthz", axum::routing::get(|| async { "ok" }))
         .fallback_service(spa)
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))

@@ -19,6 +19,9 @@ pub struct Config {
     pub vapid_public_key: String,
     pub vapid_private_key: String,
     pub vapid_subject: String,
+    /// `owner/repo` the website offers desktop downloads from. Configurable so
+    /// a fork ships its own builds rather than pointing at someone else's.
+    pub desktop_release_repo: String,
 }
 
 fn var_or(key: &str, default: &str) -> String {
@@ -60,6 +63,7 @@ impl Config {
             vapid_public_key: var_or("VAPID_PUBLIC_KEY", ""),
             vapid_private_key: var_or("VAPID_PRIVATE_KEY", ""),
             vapid_subject: var_or("VAPID_SUBJECT", "mailto:admin@example.com"),
+            desktop_release_repo: var_or("DESKTOP_RELEASE_REPO", "scopeddlol/minichat"),
         }
     }
 

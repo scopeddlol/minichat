@@ -1,7 +1,8 @@
 import { ArrowRight, Check, Loader2, LogIn, ShieldCheck, Sparkles, UserPlus, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../lib/api'
-import { applyAccent, useStore } from '../lib/store'
+import { useStore } from '../lib/store'
+import { applyAccent } from '../lib/theme'
 import type { InstanceMeta, InvitePreview } from '../lib/types'
 import { Field, Spinner, toast } from '../components/ui'
 import { BackdropGlow } from './Setup'
@@ -141,6 +142,19 @@ export default function Auth({ meta, inviteCode }: { meta: InstanceMeta; inviteC
       <BackdropGlow accent={branding.accent} />
 
       {/* Instance showcase */}
+      {meta.login_image_url && (
+        <div
+          className="fixed inset-0 pointer-events-none"
+          aria-hidden
+          style={{
+            background: `url(${meta.login_image_url}) center/cover`,
+            // Kept well behind the text: a background that competes with the
+            // copy makes the form harder to read, not more attractive.
+            opacity: 0.18,
+          }}
+        />
+      )}
+
       <aside className="relative lg:w-[46%] lg:min-h-full flex flex-col justify-center px-6 sm:px-10 py-10 lg:py-16 safe-top">
         <div className="max-w-md mx-auto lg:mx-0 w-full">
           {branding.banner && (

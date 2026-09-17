@@ -53,6 +53,8 @@ pub struct Inner {
     pub connections: RwLock<HashMap<String, usize>>,
     /// user_id -> current voice state.
     pub voice: RwLock<HashMap<String, VoiceState>>,
+    /// Cached answer from the desktop release lookup.
+    pub desktop_release: RwLock<Option<crate::desktop::CachedRelease>>,
 }
 
 #[derive(Clone)]
@@ -74,6 +76,7 @@ impl AppState {
             events,
             connections: RwLock::new(HashMap::new()),
             voice: RwLock::new(HashMap::new()),
+            desktop_release: RwLock::new(None),
         }))
     }
 

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { api, ApiError } from '../../lib/api'
 import { useStore } from '../../lib/store'
 import type { Webhook } from '../../lib/types'
+import Select from '../Select'
 import { Field, Modal, copyText, toast, useConfirm } from '../ui'
 
 export default function Integrations() {
@@ -150,15 +151,14 @@ export default function Integrations() {
             <input className="input" value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="CI bot" />
           </Field>
           <Field label="Channel">
-            <select className="input" value={channelId} onChange={(e) => setChannelId(e.target.value)}>
-              {channels
+            <Select
+              value={channelId}
+              onChange={setChannelId}
+              ariaLabel="Channel"
+              options={channels
                 .filter((channel) => channel.kind !== 'voice')
-                .map((channel) => (
-                  <option key={channel.id} value={channel.id}>
-                    #{channel.name}
-                  </option>
-                ))}
-            </select>
+                .map((channel) => ({ value: channel.id, label: `#${channel.name}` }))}
+            />
           </Field>
         </div>
       </Modal>

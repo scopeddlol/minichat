@@ -3,7 +3,7 @@ import Auth from './routes/Auth'
 import Chat from './routes/Chat'
 import Setup from './routes/Setup'
 import { ConfirmProvider, Spinner, ToastViewport } from './components/ui'
-import { applyTheme, getStoredTheme } from './components/SettingsModal'
+import { applyTheme, effectiveTheme } from './lib/theme'
 import { useStore } from './lib/store'
 
 /** Path-based routing without a router: the app only has one real route. */
@@ -20,10 +20,10 @@ export default function App() {
   const [inviteCode] = useState(readInviteCode)
 
   useEffect(() => {
-    applyTheme(getStoredTheme())
+    applyTheme()
     const media = window.matchMedia('(prefers-color-scheme: light)')
     const onChange = () => {
-      if (getStoredTheme() === 'system') applyTheme('system')
+      if (effectiveTheme() === 'system') applyTheme('system')
     }
     media.addEventListener('change', onChange)
     void boot()

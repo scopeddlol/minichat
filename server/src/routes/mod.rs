@@ -23,6 +23,7 @@ pub fn api_router() -> Router<AppState> {
     Router::new()
         // ---- public / unauthenticated ----
         .route("/meta", get(instance::meta))
+        .route("/desktop/latest", get(instance::desktop_latest))
         .route("/setup", post(setup::run_setup))
         .route("/auth/register", post(auth_routes::register))
         .route("/auth/login", post(auth_routes::login))

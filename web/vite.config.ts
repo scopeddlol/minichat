@@ -36,7 +36,12 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         // LiveKit is a large chunk and only loaded on demand; precaching it
         // would bloat every install.
-        globIgnores: ['**/livekit-*.js'],
+        globIgnores: [
+          '**/livekit-*.js',
+          // The server generates the manifest per instance; a precached copy
+          // would shadow it and every install would be branded "MiniChat".
+          '**/manifest.webmanifest',
+        ],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
       devOptions: { enabled: false },

@@ -8,6 +8,7 @@ import MemberList from '../components/MemberList'
 import MessageList from '../components/MessageList'
 import ProfileModal from '../components/ProfileModal'
 import SettingsModal from '../components/SettingsModal'
+import ScreenShareDialog from '../components/ScreenShareDialog'
 import Sidebar, { ChannelIcon } from '../components/Sidebar'
 import VoiceStage from '../components/VoiceStage'
 import { CreateChannelModal } from '../components/admin/Channels'
@@ -44,6 +45,7 @@ export default function Chat() {
   const [pinsOpen, setPinsOpen] = useState(false)
   const [lightbox, setLightbox] = useState<Attachment | null>(null)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
+  const [screenShareOpen, setScreenShareOpen] = useState(false)
 
   const channel = channels.find((c) => c.id === activeChannelId) ?? null
   const perms = channel ? (channelPermissions[channel.id] ?? permissions) : permissions
@@ -146,6 +148,7 @@ export default function Chat() {
       {/* Sidebar — fixed on desktop, a drawer on mobile */}
       <aside className="hidden md:block w-60 shrink-0 border-r" style={{ borderColor: 'var(--border-soft)' }}>
         <Sidebar
+          onPickScreenShare={() => setScreenShareOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenAdmin={() => setAdminOpen(true)}
           onOpenInvites={() => setInvitesOpen(true)}
@@ -158,7 +161,18 @@ export default function Chat() {
         <div className="md:hidden fixed inset-0 z-40 flex">
           <div className="absolute inset-0 bg-black/55 animate-fade-in" onClick={() => setSidebarOpen(false)} />
           <div className="relative w-[82vw] max-w-72 h-full animate-slide-in-right" style={{ transform: 'none' }}>
+            <button
+              className="btn btn-subtle !p-1.5 absolute top-2.5 right-2.5 z-10"
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Close channels"
+            >
+              <X size={15} />
+            </button>
             <Sidebar
+              onPickScreenShare={() => {
+                setSidebarOpen(false)
+                setScreenShareOpen(true)
+              }}
               onOpenSettings={() => {
                 setSidebarOpen(false)
                 setSettingsOpen(true)
@@ -298,6 +312,15 @@ export default function Chat() {
           <div className="xl:hidden fixed inset-0 z-40 flex justify-end">
             <div className="absolute inset-0 bg-black/55 animate-fade-in" onClick={() => setMembersOpen(false)} />
             <div className="relative w-[78vw] max-w-72 h-full animate-slide-in-right border-l">
+              {/* Without this the only way out is guessing that the backdrop
+                  is tappable — the toggle that opened it sits underneath. */}
+              <button
+                className="btn btn-subtle !p-1.5 absolute top-2.5 right-2.5 z-10"
+                onClick={() => setMembersOpen(false)}
+                aria-label="Close members"
+              >
+                <X size={15} />
+              </button>
               <MemberList onOpenProfile={openProfile} />
             </div>
           </div>
@@ -305,6 +328,7 @@ export default function Chat() {
       )}
 
       {/* Overlays */}
+      <ScreenShareDialog open={screenShareOpen} onClose={() => setScreenShareOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} onOpenProfile={openProfile} />
       <CreateChannelModal open={createChannelOpen} onClose={() => setCreateChannelOpen(false)} />

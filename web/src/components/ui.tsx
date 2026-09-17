@@ -130,7 +130,11 @@ export function Modal({
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Escape') return
+      // A dropdown open inside the modal owns Escape first — dismissing a
+      // picker shouldn't also throw away the dialog you were filling in.
+      if (document.querySelector('[role="listbox"]')) return
+      onClose()
     }
     document.addEventListener('keydown', onKey)
     const previous = document.body.style.overflow
@@ -562,6 +566,53 @@ export function Badge({
       }}
     >
       {children}
+    </span>
+  )
+}
+
+/**
+ * The badge and icon of the highest-ranked role a member holds that defines
+ * one. Roles carry visual identity now, not just a colour.
+ */
+export function RoleFlair({
+  roles,
+  memberRoleIds,
+  size = 'sm',
+}: {
+  roles: import('../lib/types').Role[]
+  memberRoleIds: string[]
+  size?: 'xs' | 'sm'
+}) {
+  const ranked = roles
+    .filter((role) => memberRoleIds.includes(role.id) && (role.badge || role.icon_url))
+    .sort((a, b) => b.position - a.position)
+  const flair = ranked[0]
+  if (!flair) return null
+
+  const pixels = size === 'xs' ? 12 : 14
+  return (
+    <span className="inline-flex items-center gap-1 shrink-0" title={flair.name}>
+      {flair.icon_url && (
+        <img
+          src={flair.icon_url}
+          alt=""
+          className="object-contain rounded-sm"
+          style={{ width: pixels, height: pixels }}
+        />
+      )}
+      {flair.badge && (
+        <span
+          className="text-[0.62rem] font-bold px-1 rounded uppercase tracking-wide leading-[1.35]"
+          style={{
+            background: flair.color
+              ? `color-mix(in oklab, ${flair.color} 22%, transparent)`
+              : 'var(--surface-3)',
+            color: flair.color ?? 'var(--text-muted)',
+          }}
+        >
+          {flair.badge}
+        </span>
+      )}
     </span>
   )
 }

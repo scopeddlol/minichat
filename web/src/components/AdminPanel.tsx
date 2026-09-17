@@ -13,6 +13,7 @@ import Invites from './admin/Invites'
 import Members from './admin/Members'
 import Overview from './admin/Overview'
 import Roles from './admin/Roles'
+import Select from './Select'
 import { Modal } from './ui'
 
 type Tab =
@@ -65,11 +66,30 @@ export default function AdminPanel({
   return (
     <Modal open={open} onClose={onClose} width="full" bare>
       <div className="flex flex-col lg:flex-row" style={{ height: 'min(84vh, 820px)' }}>
-        <nav
-          className="lg:w-56 shrink-0 border-b lg:border-b-0 lg:border-r flex lg:flex-col overflow-x-auto lg:overflow-y-auto scroll-thin"
+        {/* On a phone the section list was a horizontal scroller showing
+            three of nine tabs, with the close button parked off the right-hand
+            end. A picker plus a fixed close button is reachable with a thumb. */}
+        <header
+          className="lg:hidden flex items-center gap-2 p-3 border-b shrink-0"
           style={{ background: 'var(--surface-0)' }}
         >
-          <div className="hidden lg:flex items-center gap-2 px-4 pt-4 pb-3">
+          <Shield size={16} className="shrink-0" style={{ color: 'var(--accent)' }} />
+          <Select
+            value={active ?? ''}
+            onChange={(next) => setTab(next as Tab)}
+            ariaLabel="Admin section"
+            options={available.map((entry) => ({ value: entry.key, label: entry.label }))}
+          />
+          <button className="btn btn-ghost !p-2 shrink-0" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </header>
+
+        <nav
+          className="hidden lg:w-56 shrink-0 lg:border-r lg:flex lg:flex-col lg:overflow-y-auto scroll-thin"
+          style={{ background: 'var(--surface-0)' }}
+        >
+          <div className="flex items-center gap-2 px-4 pt-4 pb-3">
             <Shield size={16} style={{ color: 'var(--accent)' }} />
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate">Admin</p>
@@ -79,7 +99,7 @@ export default function AdminPanel({
             </div>
           </div>
 
-          <div className="flex lg:flex-col gap-1 p-2 lg:px-2 flex-1">
+          <div className="flex flex-col gap-1 p-2 lg:px-2 flex-1">
             {available.map((entry) => (
               <button
                 key={entry.key}
@@ -97,14 +117,11 @@ export default function AdminPanel({
             ))}
           </div>
 
-          <button className="btn btn-ghost !p-2 m-2 shrink-0 lg:hidden" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </button>
         </nav>
 
         <div className="flex-1 min-w-0 overflow-y-auto scroll-thin" style={{ background: 'var(--bg)' }}>
           <header
-            className="hidden lg:flex items-center justify-between px-6 py-3.5 border-b sticky top-0 z-10"
+            className="hidden lg:flex items-center justify-between px-6 py-3.5 border-b sticky top-0 z-[5]"
             style={{ background: 'var(--bg)' }}
           >
             <h2 className="font-semibold">{available.find((entry) => entry.key === active)?.label}</h2>

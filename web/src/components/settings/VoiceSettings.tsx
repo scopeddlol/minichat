@@ -5,7 +5,8 @@ import {
   type HotkeyBindings,
 } from '../../lib/hotkeys'
 import { useStore } from '../../lib/store'
-import { useVoice, type DeviceSelection } from '../../lib/voice'
+import { useVoice } from '../../lib/voice'
+import Select from '../Select'
 import { Avatar, Field, Switch, toast } from '../ui'
 
 export default function VoiceSettings() {
@@ -77,7 +78,6 @@ export default function VoiceSettings() {
         <DevicePicker
           icon={<Mic size={15} />}
           label="Microphone"
-          kind="audioinput"
           options={voice.devices.audioinput}
           value={voice.selectedDevices.audioinput}
           onChange={(id) => void voice.selectDevice('audioinput', id)}
@@ -85,7 +85,6 @@ export default function VoiceSettings() {
         <DevicePicker
           icon={<Headphones size={15} />}
           label="Output"
-          kind="audiooutput"
           options={voice.devices.audiooutput}
           value={voice.selectedDevices.audiooutput}
           onChange={(id) => void voice.selectDevice('audiooutput', id)}
@@ -98,7 +97,6 @@ export default function VoiceSettings() {
         <DevicePicker
           icon={<Video size={15} />}
           label="Camera"
-          kind="videoinput"
           options={voice.devices.videoinput}
           value={voice.selectedDevices.videoinput}
           onChange={(id) => void voice.selectDevice('videoinput', id)}
@@ -251,7 +249,6 @@ export default function VoiceSettings() {
 function DevicePicker({
   icon,
   label,
-  kind,
   options,
   value,
   onChange,
@@ -259,7 +256,6 @@ function DevicePicker({
 }: {
   icon: React.ReactNode
   label: string
-  kind: keyof DeviceSelection
   options: { deviceId: string; label: string }[]
   value: string
   onChange: (deviceId: string) => void
@@ -274,22 +270,18 @@ function DevicePicker({
       }
       hint={hint}
     >
-      <select
-        className="input"
+      <Select
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
         disabled={options.length === 0}
-        aria-label={label}
-      >
-        <option value="default">System default</option>
-        {options
-          .filter((option) => option.deviceId !== 'default')
-          .map((option) => (
-            <option key={`${kind}-${option.deviceId}`} value={option.deviceId}>
-              {option.label}
-            </option>
-          ))}
-      </select>
+        ariaLabel={label}
+        options={[
+          { value: 'default', label: 'System default' },
+          ...options
+            .filter((option) => option.deviceId !== 'default')
+            .map((option) => ({ value: option.deviceId, label: option.label })),
+        ]}
+      />
     </Field>
   )
 }

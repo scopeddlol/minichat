@@ -18,6 +18,16 @@ pub struct Instance {
     pub system_channel_id: Option<String>,
     pub max_upload_mb: i64,
     pub created_at: String,
+    // --- theming ---
+    pub theme_mode: String,
+    pub surface_tint: Option<String>,
+    pub corner_radius: i64,
+    pub font_family: String,
+    pub custom_css: String,
+    // --- the pages outsiders see ---
+    pub login_headline: String,
+    pub login_body: String,
+    pub login_image_url: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -97,6 +107,8 @@ pub struct Role {
     pub is_default: bool,
     pub hoist: bool,
     pub mentionable: bool,
+    pub icon_url: Option<String>,
+    pub badge: String,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -118,6 +130,8 @@ pub struct Channel {
     pub is_private: bool,
     pub user_limit: i64,
     pub created_at: String,
+    pub emoji: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]

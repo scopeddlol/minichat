@@ -1,5 +1,5 @@
 import type {
-  Attachment, AuditEntry, BanEntry, Category, Channel, Emoji, Instance, Invite,
+  Attachment, AuditEntry, BanEntry, Category, Channel, DesktopRelease, Emoji, Instance, Invite,
   InvitePreview, InstanceMeta, Me, Member, Message, NotificationMode,
   NotificationPreferences, PermissionDef, Role, Stats, VoiceState, Webhook,
 } from './types'
@@ -102,6 +102,7 @@ export interface SetupPayload {
 
 export const api = {
   meta: () => get<InstanceMeta>('/meta'),
+  desktopLatest: () => get<DesktopRelease>('/desktop/latest'),
   setup: (payload: SetupPayload) => post<{ token: string; user_id: string }>('/setup', payload),
 
   login: (username: string, password: string) =>

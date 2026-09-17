@@ -10,6 +10,7 @@ import type { Channel } from '../lib/types'
 import { Avatar, toast } from './ui'
 
 interface SidebarProps {
+  onPickScreenShare: () => void
   onOpenSettings: () => void
   onOpenAdmin: () => void
   onOpenInvites: () => void
@@ -19,6 +20,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({
+  onPickScreenShare,
   onOpenSettings,
   onOpenAdmin,
   onOpenInvites,
@@ -191,7 +193,7 @@ export default function Sidebar({
         )}
       </nav>
 
-      <VoiceDock />
+      <VoiceDock onPickScreenShare={onPickScreenShare} />
 
       <UserDock
         onOpenSettings={onOpenSettings}
@@ -245,8 +247,18 @@ function ChannelGroup({
                 if (!active) event.currentTarget.style.background = 'transparent'
               }}
             >
-              <ChannelIcon kind={channel.kind} isPrivate={channel.is_private} />
-              <span className="flex-1 min-w-0 truncate text-left">{channel.name}</span>
+              <ChannelIcon kind={channel.kind} isPrivate={channel.is_private} emoji={channel.emoji} />
+              <span className="flex-1 min-w-0 text-left">
+                <span className="block truncate">{channel.name}</span>
+                {channel.description && (
+                  <span
+                    className="block truncate text-[0.68rem] font-normal leading-tight"
+                    style={{ color: 'var(--text-faint)' }}
+                  >
+                    {channel.description}
+                  </span>
+                )}
+              </span>
               {channel.kind === 'voice' && occupants.length > 0 && (
                 <span className="text-[0.68rem] tabular-nums" style={{ color: 'var(--text-faint)' }}>
                   {occupants.length}
@@ -319,8 +331,30 @@ function ChannelGroup({
   )
 }
 
-export function ChannelIcon({ kind, isPrivate, size = 15 }: { kind: string; isPrivate?: boolean; size?: number }) {
+export function ChannelIcon({
+  kind,
+  isPrivate,
+  emoji,
+  size = 15,
+}: {
+  kind: string
+  isPrivate?: boolean
+  /** Replaces the glyph entirely when the channel has one set. */
+  emoji?: string
+  size?: number
+}) {
   const style = { color: 'var(--text-faint)' } as const
+  if (emoji && emoji.trim()) {
+    return (
+      <span
+        className="shrink-0 inline-flex items-center justify-center leading-none"
+        style={{ width: size, height: size, fontSize: size * 0.95 }}
+        aria-hidden
+      >
+        {emoji.trim()}
+      </span>
+    )
+  }
   if (kind === 'voice') return <Volume2 size={size} style={style} className="shrink-0" />
   if (kind === 'announcement') return <Megaphone size={size} style={style} className="shrink-0" />
   if (isPrivate) return <Shield size={size} style={style} className="shrink-0" />
@@ -328,7 +362,7 @@ export function ChannelIcon({ kind, isPrivate, size = 15 }: { kind: string; isPr
 }
 
 /** Live voice controls, shown only while connected to a channel. */
-function VoiceDock() {
+function VoiceDock({ onPickScreenShare }: { onPickScreenShare: () => void }) {
   const {
     connected, connecting, channelId, muted, deafened, cameraOn, screenSharing,
     canVideo, canScreenShare, canSpeak, pushToTalkActive,
@@ -397,7 +431,12 @@ function VoiceDock() {
         <VoiceButton
           active={screenSharing}
           disabled={!canScreenShare}
-          onClick={() => void voice.toggleScreenShare()}
+          onClick={() => {
+            // Already sharing: stop straight away. Otherwise ask for quality
+            // first, since it can't be changed mid-share.
+            if (screenSharing) void voice.stopScreenShare()
+            else onPickScreenShare()
+          }}
           title={screenSharing ? 'Stop sharing' : 'Share screen'}
         >
           <ScreenShare size={15} />

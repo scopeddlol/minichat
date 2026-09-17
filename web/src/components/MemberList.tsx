@@ -2,7 +2,7 @@ import { Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
 import type { Member, Role } from '../lib/types'
-import { Avatar } from './ui'
+import { Avatar, RoleFlair } from './ui'
 
 /** Members grouped by their highest hoisted role, Discord-style. */
 export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: string) => void }) {
@@ -52,7 +52,7 @@ export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: 
 
   return (
     <div className="h-full flex flex-col" style={{ background: 'var(--surface-0)' }}>
-      <header className="px-3 py-2.5 border-b shrink-0" style={{ borderColor: 'var(--border-soft)' }}>
+      <header className="px-3 py-2.5 border-b shrink-0 xl:pr-3 pr-12" style={{ borderColor: 'var(--border-soft)' }}>
         <div className="relative">
           <Search
             size={14}
@@ -102,11 +102,14 @@ export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: 
                       presence={member.presence}
                     />
                     <span className="min-w-0 flex-1">
-                      <span
-                        className="text-[0.84rem] font-medium truncate block leading-tight"
-                        style={{ color: roleColor ?? 'var(--text)' }}
-                      >
-                        {member.display_name}
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className="text-[0.84rem] font-medium truncate leading-tight"
+                          style={{ color: roleColor ?? 'var(--text)' }}
+                        >
+                          {member.display_name}
+                        </span>
+                        <RoleFlair roles={roles} memberRoleIds={member.roles} size="xs" />
                       </span>
                       {member.custom_status && (
                         <span className="text-[0.7rem] truncate block" style={{ color: 'var(--text-faint)' }}>

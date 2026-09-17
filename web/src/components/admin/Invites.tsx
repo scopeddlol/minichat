@@ -5,6 +5,7 @@ import { formatRelative } from '../../lib/format'
 import { can, P } from '../../lib/perms'
 import { useStore } from '../../lib/store'
 import type { Invite } from '../../lib/types'
+import Select from '../Select'
 import { Field, Modal, copyText, toast, useConfirm } from '../ui'
 
 export default function Invites() {
@@ -238,26 +239,32 @@ export function CreateInviteModal({
               />
             </Field>
             <Field label="Expires after">
-              <select className="input" value={expiresIn} onChange={(e) => setExpiresIn(Number(e.target.value))}>
-                <option value={1}>1 hour</option>
-                <option value={24}>1 day</option>
-                <option value={168}>7 days</option>
-                <option value={720}>30 days</option>
-                <option value={0}>Never</option>
-              </select>
+              <Select
+                value={String(expiresIn)}
+                onChange={(next) => setExpiresIn(Number(next))}
+                ariaLabel="Expires after"
+                options={[
+                  { value: '1', label: '1 hour' },
+                  { value: '24', label: '1 day' },
+                  { value: '168', label: '7 days' },
+                  { value: '720', label: '30 days' },
+                  { value: '0', label: 'Never' },
+                ]}
+              />
             </Field>
             {canAssignRole && (
               <Field label="Grant a role on join" hint="Optional — useful for pre-approving moderators.">
-                <select className="input" value={roleId} onChange={(e) => setRoleId(e.target.value)}>
-                  <option value="">No extra role</option>
-                  {roles
-                    .filter((role) => !role.is_default)
-                    .map((role) => (
-                      <option key={role.id} value={role.id}>
-                        {role.name}
-                      </option>
-                    ))}
-                </select>
+                <Select
+                  value={roleId}
+                  onChange={setRoleId}
+                  ariaLabel="Grant a role on join"
+                  options={[
+                    { value: '', label: 'No extra role' },
+                    ...roles
+                      .filter((role) => !role.is_default)
+                      .map((role) => ({ value: role.id, label: role.name, swatch: role.color })),
+                  ]}
+                />
               </Field>
             )}
           </>

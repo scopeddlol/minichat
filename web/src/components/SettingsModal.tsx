@@ -1,38 +1,19 @@
 import {
   Bell, Download, Headphones, Image as ImageIcon, Info, KeyRound, LogOut, Monitor, Moon,
-  Palette, Smartphone, Sun, User, X,
+  Palette, Smartphone, Sparkles, Sun, User, X,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, ApiError, setToken } from '../lib/api'
+import { formatBytes } from '../lib/format'
+import type { DesktopRelease } from '../lib/types'
 import { useStore } from '../lib/store'
+import { clearThemeOverride, setTheme, storedTheme, type ThemeChoice } from '../lib/theme'
+import Select from './Select'
 import NotificationSettings from './settings/NotificationSettings'
 import VoiceSettings from './settings/VoiceSettings'
 import { Avatar, ColorField, Field, Modal, Switch, toast, useConfirm } from './ui'
 
 type Tab = 'profile' | 'notifications' | 'voice' | 'appearance' | 'account' | 'about'
-type Theme = 'dark' | 'light' | 'system'
-
-export function getStoredTheme(): Theme {
-  try {
-    return (localStorage.getItem('minichat.theme') as Theme) || 'dark'
-  } catch {
-    return 'dark'
-  }
-}
-
-export function applyTheme(theme: Theme) {
-  const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches
-  const light = theme === 'light' || (theme === 'system' && prefersLight)
-  document.documentElement.classList.toggle('light', light)
-  document.documentElement.classList.toggle('dark', !light)
-  const meta = document.querySelector('meta[name="theme-color"]')
-  meta?.setAttribute('content', light ? '#f3f4f8' : '#0d0f16')
-  try {
-    localStorage.setItem('minichat.theme', theme)
-  } catch {
-    /* ignore */
-  }
-}
 
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const me = useStore((s) => s.me)
@@ -54,7 +35,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
   const [bannerUrl, setBannerUrl] = useState<string | null>(null)
   const [email, setEmail] = useState('')
 
-  const [theme, setTheme] = useState<Theme>(getStoredTheme)
+  const [theme, setThemeState] = useState<ThemeChoice | null>(storedTheme)
   const [compact, setCompact] = useState(() => localStorage.getItem('minichat.compact') === '1')
 
   const [currentPassword, setCurrentPassword] = useState('')
@@ -133,11 +114,28 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
   return (
     <Modal open={open} onClose={onClose} width="lg" bare>
       <div className="flex flex-col sm:flex-row min-h-[520px]">
-        <nav
-          className="sm:w-48 shrink-0 p-3 border-b sm:border-b-0 sm:border-r flex sm:flex-col gap-1 overflow-x-auto"
+        {/* Phones get a picker and a close button that stays put, rather than
+            a scroller with the X hidden past the right edge. */}
+        <header
+          className="sm:hidden flex items-center gap-2 p-3 border-b shrink-0"
           style={{ background: 'var(--surface-0)' }}
         >
-          <div className="hidden sm:flex items-center justify-between mb-2 px-1">
+          <Select
+            value={tab}
+            onChange={(next) => setTab(next as Tab)}
+            ariaLabel="Settings section"
+            options={TABS.map((entry) => ({ value: entry.key, label: entry.label }))}
+          />
+          <button className="btn btn-ghost !p-2 shrink-0" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </header>
+
+        <nav
+          className="hidden sm:w-48 shrink-0 p-3 sm:border-r sm:flex sm:flex-col gap-1"
+          style={{ background: 'var(--surface-0)' }}
+        >
+          <div className="flex items-center justify-between mb-2 px-1">
             <span className="label !mb-0">Settings</span>
             <button className="btn btn-ghost !p-1" onClick={onClose} aria-label="Close">
               <X size={15} />
@@ -158,9 +156,6 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
               {entry.label}
             </button>
           ))}
-          <button className="btn btn-ghost sm:hidden !p-2 ml-auto" onClick={onClose} aria-label="Close">
-            <X size={16} />
-          </button>
         </nav>
 
         <div className="flex-1 p-5 sm:p-6 overflow-y-auto scroll-thin min-w-0">
@@ -286,19 +281,21 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
               <h2 className="text-lg font-semibold">Appearance</h2>
               <div>
                 <span className="label">Theme</span>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {(
                     [
+                      [null, 'Instance', <Sparkles size={16} key="i" />],
                       ['dark', 'Dark', <Moon size={16} key="d" />],
                       ['light', 'Light', <Sun size={16} key="l" />],
                       ['system', 'System', <Monitor size={16} key="s" />],
                     ] as const
                   ).map(([value, label, icon]) => (
                     <button
-                      key={value}
+                      key={label}
                       onClick={() => {
-                        setTheme(value)
-                        applyTheme(value)
+                        setThemeState(value)
+                        if (value === null) clearThemeOverride()
+                        else setTheme(value)
                       }}
                       className="flex flex-col items-center gap-1.5 py-4 rounded-xl border transition-colors"
                       style={{
@@ -443,6 +440,87 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
   )
 }
 
+/**
+ * Offers the desktop app, resolved from the newest GitHub release rather than
+ * a hardcoded link, so a build is downloadable the moment it is published.
+ */
+function DesktopDownload({ highlight }: { highlight: boolean }) {
+  const [release, setRelease] = useState<DesktopRelease | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api
+      .desktopLatest()
+      .then(setRelease)
+      .catch(() => setRelease(null))
+      .finally(() => setLoading(false))
+  }, [])
+
+  // An installer, preferring the .msi that most people want.
+  const primary =
+    release?.assets.find((asset) => asset.kind === 'msi') ?? release?.assets[0] ?? null
+  const secondary = release?.assets.find((asset) => asset !== primary) ?? null
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-start gap-3">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+          style={{
+            background: highlight ? 'var(--accent-soft)' : 'var(--surface-3)',
+            color: highlight ? 'var(--accent)' : 'var(--text-muted)',
+          }}
+        >
+          <Monitor size={17} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold text-sm">Windows desktop app</h3>
+          <p className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            A native window with global push-to-talk that works while you're in a game, plus a tray
+            icon and no browser permission prompts.
+          </p>
+
+          {loading ? (
+            <p className="text-xs mt-3" style={{ color: 'var(--text-faint)' }}>
+              Checking for the latest build…
+            </p>
+          ) : release?.available && primary ? (
+            <>
+              <div className="flex gap-2 mt-3 flex-wrap">
+                <a className="btn btn-primary" href={primary.url}>
+                  <Download size={14} /> Download {primary.kind === 'msi' ? 'installer' : 'setup'}
+                </a>
+                {secondary && (
+                  <a className="btn btn-subtle" href={secondary.url}>
+                    .{secondary.kind}
+                  </a>
+                )}
+              </div>
+              <p className="text-[0.7rem] mt-2" style={{ color: 'var(--text-faint)' }}>
+                {release.version} · {formatBytes(primary.size)} ·{' '}
+                <a
+                  href={release.release_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  release notes
+                </a>
+              </p>
+            </>
+          ) : (
+            <p className="text-xs mt-3 leading-relaxed" style={{ color: 'var(--text-faint)' }}>
+              No published build found for <code>{release?.repo ?? 'this instance'}</code>. Your
+              operator can publish one by tagging a release, or point
+              <code className="mx-1">DESKTOP_RELEASE_REPO</code> at their own fork.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AboutTab({ onClose }: { onClose: () => void }) {
   const meta = useStore((s) => s.meta)
   const instance = useStore((s) => s.instance)
@@ -514,25 +592,7 @@ function AboutTab({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {isWindows && !isDesktopApp && (
-        <div className="card p-4">
-          <div className="flex items-start gap-3">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-              style={{ background: 'var(--surface-3)', color: 'var(--text-muted)' }}
-            >
-              <Monitor size={17} />
-            </div>
-            <div className="min-w-0">
-              <h3 className="font-semibold text-sm">Windows desktop app</h3>
-              <p className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                A native window with global push-to-talk and tray support. Your instance operator builds
-                and publishes it from the <code>desktop/</code> folder — ask them for the installer link.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      {!isDesktopApp && <DesktopDownload highlight={isWindows} />}
 
       <div className="pt-4 border-t text-xs space-y-1" style={{ color: 'var(--text-faint)' }}>
         <p>

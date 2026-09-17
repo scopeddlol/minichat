@@ -37,6 +37,9 @@ export interface Role {
   is_default: boolean
   hoist: boolean
   mentionable: boolean
+  icon_url: string | null
+  /** A short text badge shown beside the name, e.g. "MOD". */
+  badge: string
 }
 
 export interface Category {
@@ -56,6 +59,10 @@ export interface Channel {
   is_private: boolean
   user_limit: number
   created_at: string
+  /** Shown in place of the # / speaker glyph. */
+  emoji: string
+  /** A short line under the channel name in the sidebar. */
+  description: string
 }
 
 export interface Attachment {
@@ -102,7 +109,23 @@ export interface Message {
   failed?: boolean
 }
 
-export interface Instance {
+/** Everything an operator can change about how the instance looks. */
+export interface Branding {
+  theme_mode: 'dark' | 'light' | 'system'
+  surface_tint: string | null
+  corner_radius: number
+  font_family: string
+  custom_css: string
+}
+
+/** The copy shown on the pages people see before they have an account. */
+export interface LandingContent {
+  login_headline: string
+  login_body: string
+  login_image_url: string | null
+}
+
+export interface Instance extends Branding, LandingContent {
   name: string
   tagline: string
   description: string
@@ -120,7 +143,7 @@ export interface Instance {
   created_at: string
 }
 
-export interface InstanceMeta {
+export interface InstanceMeta extends Branding, LandingContent {
   name: string
   tagline: string
   description: string
@@ -214,6 +237,22 @@ export interface Stats {
   voice_enabled: boolean
   public_url: string
   version: string
+}
+
+export interface DesktopAsset {
+  name: string
+  url: string
+  size: number
+  kind: 'msi' | 'exe'
+}
+
+export interface DesktopRelease {
+  available: boolean
+  version: string
+  published_at: string
+  release_url: string
+  assets: DesktopAsset[]
+  repo: string
 }
 
 export interface InvitePreview {

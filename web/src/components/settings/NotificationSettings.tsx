@@ -4,6 +4,7 @@ import { api, ApiError } from '../../lib/api'
 import * as push from '../../lib/push'
 import { useStore } from '../../lib/store'
 import type { NotificationMode } from '../../lib/types'
+import Select from '../Select'
 import { ChannelIcon } from '../Sidebar'
 import { Field, toast } from '../ui'
 
@@ -201,23 +202,24 @@ export default function NotificationSettings() {
                 <div key={channel.id} className="flex items-center gap-2 px-3 py-2">
                   <ChannelIcon kind={channel.kind} isPrivate={channel.is_private} size={14} />
                   <span className="text-sm flex-1 min-w-0 truncate">{channel.name}</span>
-                  <select
-                    className="input !w-auto !py-1 !text-xs"
+                  <Select
+                    width="auto"
+                    className="!py-1 !text-xs"
+                    ariaLabel={`Notifications for ${channel.name}`}
                     value={override ?? 'inherit'}
-                    onChange={(event) =>
+                    onChange={(next) =>
                       void setChannelMode(
                         channel.id,
-                        event.target.value === 'inherit'
-                          ? null
-                          : (event.target.value as NotificationMode),
+                        next === 'inherit' ? null : (next as NotificationMode),
                       )
                     }
-                  >
-                    <option value="inherit">Default</option>
-                    <option value="all">Everything</option>
-                    <option value="mentions">Mentions</option>
-                    <option value="none">Muted</option>
-                  </select>
+                    options={[
+                      { value: 'inherit', label: 'Default' },
+                      { value: 'all', label: 'Everything' },
+                      { value: 'mentions', label: 'Mentions' },
+                      { value: 'none', label: 'Muted' },
+                    ]}
+                  />
                 </div>
               )
             })}

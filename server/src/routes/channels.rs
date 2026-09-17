@@ -153,6 +153,10 @@ pub async fn create_channel(
 pub struct UpdateChannelInput {
     pub name: Option<String>,
     pub topic: Option<String>,
+    /// Shown in place of the # / speaker glyph.
+    pub emoji: Option<String>,
+    /// A short line under the channel name in the sidebar.
+    pub description: Option<String>,
     pub category_id: Option<Option<String>>,
     pub position: Option<i64>,
     pub slowmode: Option<i64>,
@@ -179,6 +183,12 @@ pub async fn update_channel(
     if let Some(topic) = &input.topic {
         channel.topic = validate::optional_text(topic, "Topic", 256)?;
     }
+    if let Some(emoji) = &input.emoji {
+        channel.emoji = validate::optional_text(emoji, "Emoji", 8)?;
+    }
+    if let Some(description) = &input.description {
+        channel.description = validate::optional_text(description, "Description", 100)?;
+    }
     if let Some(category_id) = &input.category_id {
         channel.category_id = category_id.clone();
     }
@@ -196,11 +206,13 @@ pub async fn update_channel(
     }
 
     sqlx::query(
-        "UPDATE channels SET name = ?, topic = ?, category_id = ?, position = ?, slowmode = ?,
-                is_private = ?, user_limit = ? WHERE id = ?",
+        "UPDATE channels SET name = ?, topic = ?, emoji = ?, description = ?, category_id = ?,
+                position = ?, slowmode = ?, is_private = ?, user_limit = ? WHERE id = ?",
     )
     .bind(&channel.name)
     .bind(&channel.topic)
+    .bind(&channel.emoji)
+    .bind(&channel.description)
     .bind(&channel.category_id)
     .bind(channel.position)
     .bind(channel.slowmode)

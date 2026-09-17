@@ -10,7 +10,7 @@ import { isJumboEmoji, renderMarkdown } from '../lib/markdown'
 import { can, P } from '../lib/perms'
 import { useStore } from '../lib/store'
 import type { Attachment, Message } from '../lib/types'
-import { Avatar, Badge, toast, useConfirm } from './ui'
+import { Avatar, Badge, RoleFlair, toast, useConfirm } from './ui'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '🔥']
 
@@ -202,6 +202,7 @@ function MessageItemInner({
                 >
                   {displayName}
                 </button>
+                {author && <RoleFlair roles={roles} memberRoleIds={author.roles} />}
                 {message.webhook_name && <Badge>App</Badge>}
                 {author?.is_operator && <Badge color="var(--accent)">Operator</Badge>}
                 <time

@@ -1,4 +1,4 @@
-import { Plus, Save, Shield, Trash2 } from 'lucide-react'
+import { Plus, Save, Shield, Trash2, Upload, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../../lib/api'
 import { P, toBits } from '../../lib/perms'
@@ -71,6 +71,8 @@ export default function Roles() {
         hoist: draft.hoist,
         mentionable: draft.mentionable,
         position: draft.position,
+        icon_url: draft.icon_url ?? '',
+        badge: draft.badge,
       })
       toast.success('Role saved.')
     } catch (error) {
@@ -123,6 +125,19 @@ export default function Roles() {
             >
               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: role.color ?? 'var(--text-faint)' }} />
               <span className="flex-1 min-w-0 truncate font-medium">{role.name}</span>
+              {role.badge && (
+                <span
+                  className="text-[0.6rem] font-bold px-1 rounded uppercase shrink-0"
+                  style={{
+                    background: role.color
+                      ? `color-mix(in oklab, ${role.color} 22%, transparent)`
+                      : 'var(--surface-3)',
+                    color: role.color ?? 'var(--text-muted)',
+                  }}
+                >
+                  {role.badge}
+                </span>
+              )}
               <span className="text-[0.68rem] tabular-nums" style={{ color: 'var(--text-faint)' }}>
                 {memberCount(role.id)}
               </span>
@@ -190,6 +205,59 @@ export default function Roles() {
                   onChange={(v) => setDraft({ ...draft, mentionable: v })}
                   label="Anyone can @mention this role"
                 />
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Field label="Badge" hint="Up to 8 characters, shown beside the name in chat.">
+                  <input
+                    className="input"
+                    value={draft.badge}
+                    maxLength={8}
+                    onChange={(e) => setDraft({ ...draft, badge: e.target.value })}
+                    placeholder="MOD"
+                  />
+                </Field>
+                <Field label="Icon" hint="A small image shown beside the name.">
+                  <div className="flex gap-2 items-center">
+                    {draft.icon_url && (
+                      <img
+                        src={draft.icon_url}
+                        alt=""
+                        className="w-9 h-9 object-contain rounded-lg shrink-0"
+                        style={{ background: 'var(--surface-2)' }}
+                      />
+                    )}
+                    <label className="btn btn-subtle cursor-pointer shrink-0">
+                      <Upload size={14} /> {draft.icon_url ? 'Replace' : 'Upload'}
+                      <input
+                        type="file"
+                        accept="image/png,image/webp,image/gif,image/jpeg"
+                        className="hidden"
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0]
+                          if (!file) return
+                          try {
+                            const attachment = await api.upload(file)
+                            setDraft({ ...draft, icon_url: attachment.url })
+                          } catch (error) {
+                            toast.error(
+                              error instanceof ApiError ? error.message : 'Upload failed.',
+                            )
+                          }
+                        }}
+                      />
+                    </label>
+                    {draft.icon_url && (
+                      <button
+                        className="btn btn-ghost !p-2 shrink-0"
+                        onClick={() => setDraft({ ...draft, icon_url: null })}
+                        aria-label="Remove icon"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </Field>
               </div>
 
               <Field label="Rank" hint="Higher ranks can manage lower ones. Your own rank caps what you can set.">
