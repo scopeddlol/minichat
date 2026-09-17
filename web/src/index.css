@@ -42,6 +42,10 @@
   --warning: #fbbf24;
   --danger: #f87171;
 
+  /* Height of the desktop app's caption bar; 0 everywhere else, so the
+     layout rules below are a no-op in a browser. <TitleBar /> reads it too. */
+  --titlebar-h: 0px;
+
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
   --shadow-md: 0 8px 24px -8px rgb(0 0 0 / 0.5);
   --shadow-lg: 0 24px 60px -18px rgb(0 0 0 / 0.65);
@@ -66,6 +70,10 @@ html.light {
   --shadow-lg: 0 24px 60px -20px rgb(15 23 42 / 0.22);
 }
 
+html.desktop {
+  --titlebar-h: 36px;
+}
+
 * {
   border-color: var(--border);
 }
@@ -76,15 +84,13 @@ body,
   height: 100%;
 }
 
-/* The desktop app runs in a frameless window and draws its own 36px caption
-   bar (<TitleBar />), so the app itself starts below it. Added in main.tsx. */
-html.desktop #root {
-  margin-top: 36px;
-  height: calc(100% - 36px);
-}
-
 body {
   margin: 0;
+  /* The app shell is exactly one viewport tall and every scrollable region
+     lives inside it, so the document itself must never scroll. Without this a
+     single pixel of overflow anywhere shows up as a page scrollbar and a strip
+     of dead space at the bottom of the window. */
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
@@ -92,6 +98,20 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
+}
+
+/* The desktop app runs in a frameless window and draws its own caption bar
+   (<TitleBar />), so the app starts below it. `html.desktop` is set in
+   main.tsx before the first render.
+
+   This has to be padding on a border-box body, not a margin on #root: a
+   top margin there collapses straight through body and moves *body* down
+   instead, leaving the document a caption bar taller than the window.
+   Tailwind's preflight makes everything border-box; it is stated here
+   because this rule depends on it. */
+html.desktop body {
+  box-sizing: border-box;
+  padding-top: var(--titlebar-h);
 }
 
 /* Respect the notch / home indicator on installed mobile PWAs. */
