@@ -122,7 +122,7 @@ mod tests {
             list(State(state.clone()), b.clone()).await.unwrap().0[0]["unread"],
             1
         );
-        ack(
+        let _ = ack(
             State(state.clone()),
             b.clone(),
             Path(id.clone()),
@@ -223,7 +223,7 @@ mod tests {
         )
         .await
         .is_err());
-        action(
+        let _ = action(
             State(state.clone()),
             b.clone(),
             Path(id.clone()),
@@ -239,7 +239,7 @@ mod tests {
         assert!(token(State(state.clone()), outsider, Path(id.clone()))
             .await
             .is_err());
-        action(
+        let _ = action(
             State(state.clone()),
             b,
             Path(id.clone()),
@@ -438,16 +438,52 @@ pub async fn call(
         return Err(AppError::bad("Calls are not configured on this instance."));
     }
     expire(&state).await?;
-    sqlx::query("INSERT INTO direct_calls(id,conversation_id,caller_id,status) VALUES(?,?,?,'ringing') ON CONFLICT DO NOTHING")
-        .bind(ids::new_id()).bind(&id).bind(auth.id()).execute(&state.db).await?;
+    let inserted = sqlx::query(
+        "INSERT INTO direct_calls(id,conversation_id,caller_id,status)
+        SELECT ?,?,?,'ringing' WHERE NOT EXISTS (
+          SELECT 1 FROM direct_calls d JOIN conversations c ON c.id = d.conversation_id
+          WHERE d.status != 'ended' AND (c.user_a IN (?,?) OR c.user_b IN (?,?))
+        ) ON CONFLICT DO NOTHING",
+    )
+    .bind(ids::new_id())
+    .bind(&id)
+    .bind(auth.id())
+    .bind(&members.0)
+    .bind(&members.1)
+    .bind(&members.0)
+    .bind(&members.1)
+    .execute(&state.db)
+    .await?;
     let call: Call = sqlx::query_as(
         "SELECT * FROM direct_calls WHERE conversation_id = ? AND status != 'ended'",
     )
     .bind(id)
-    .fetch_one(&state.db)
-    .await?;
-    emit(&state, &members, "DIRECT_CALL", json!(call));
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::bad("One of you is already in another call."))?;
+    if inserted.rows_affected() > 0 {
+        emit(&state, &members, "DIRECT_CALL", json!(call));
+    }
     Ok(Json(json!(call)))
+}
+
+/// The final gateway connection disappearing must not leave the peer ringing
+/// or connected indefinitely. Events are still restricted to the two members.
+pub async fn disconnect(state: &AppState, user: &str) -> AppResult<()> {
+    let ended: Vec<Call> = sqlx::query_as(
+        "UPDATE direct_calls SET status = 'ended'
+        WHERE status != 'ended' AND conversation_id IN
+        (SELECT id FROM conversations WHERE user_a = ? OR user_b = ?) RETURNING *",
+    )
+    .bind(user)
+    .bind(user)
+    .fetch_all(&state.db)
+    .await?;
+    for call in ended {
+        let members = participants(state, user, &call.conversation_id).await?;
+        emit(state, &members, "DIRECT_CALL", json!(call));
+    }
+    Ok(())
 }
 #[derive(Deserialize)]
 pub struct CallAction {

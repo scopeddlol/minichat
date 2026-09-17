@@ -31,6 +31,10 @@ export default function DirectCallOverlay({ onShare }: { onShare: () => void }) 
     })
     return () => { disposed = true; clearInterval(timer); off() }
   }, [])
+  useEffect(() => {
+    if (!voice.channelId?.startsWith('direct:') || !voice.connected) return
+    if (!calls.some(c => `direct:${c.id}` === voice.channelId && c.status === 'accepted')) void voice.leave()
+  }, [calls, voice.channelId, voice.connected, voice.leave])
   const active = calls.find(c => voice.channelId === `direct:${c.id}`)
   const ringing = calls.find(c => c.status === 'ringing' && now - new Date(c.created_at.replace(' ', 'T') + 'Z').getTime() < 45000)
   const call = active ?? ringing ?? calls.find(c => c.status === 'accepted')

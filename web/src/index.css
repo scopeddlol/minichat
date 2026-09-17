@@ -2,7 +2,7 @@
 
 /* v0.4: quiet surfaces, comfortable rhythm, bounded flex/scroll regions. */
 html, body { width: 100%; overflow: hidden; }
-#root { min-width: 0; }
+#root { min-width: 0; overflow-y: auto; overflow-x: hidden; }
 button, input, textarea, select { font: inherit; }
 button { touch-action: manipulation; }
 img, video { max-width: 100%; }

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { request } from './api'
+import { getToken, request } from './api'
 import { gateway } from './gateway'
 
 export interface Conversation { id: string; peer_id: string; last_content: string | null; unread: number }
@@ -25,13 +25,20 @@ interface Inbox {
 }
 export const useInbox = create<Inbox>((set) => ({
   open: false, active: null, conversations: [],
-  async refresh() { set({ conversations: await direct.list() }) },
+  async refresh() {
+    const token = getToken()
+    const conversations = await direct.list()
+    if (token && token === getToken()) set({ conversations })
+  },
   async openPeer(id) {
     const conversation = await direct.open(id)
     set({ active: conversation.id, open: true })
     set({ conversations: await direct.list() })
   },
 }))
+gateway.onStatus(status => {
+  if (status === 'closed') useInbox.setState({ open: false, active: null, conversations: [] })
+})
 gateway.on(event => {
   if (['READY', 'DIRECT_MESSAGE', 'DIRECT_READ'].includes(event.t)) void useInbox.getState().refresh().catch(() => undefined)
   if (event.t === 'INVALID_SESSION') useInbox.setState({ open: false, active: null, conversations: [] })

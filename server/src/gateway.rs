@@ -312,6 +312,7 @@ async fn cleanup(state: &AppState, user_id: &str) {
     };
 
     if last {
+        let _ = crate::routes::direct::disconnect(state, user_id).await;
         state.voice.write().await.remove(user_id);
         state.emit_all("VOICE_STATE_LEAVE", json!({"user_id": user_id}));
         let _ = sqlx::query(
