@@ -56,8 +56,8 @@ requests certificates.
 
 ```bash
 mkdir minichat && cd minichat
-curl -O https://raw.githubusercontent.com/scopeddlol/minichat/v0.2.0/compose.yml
-curl -o .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.2.0/.env.example
+curl -O https://raw.githubusercontent.com/scopeddlol/minichat/v0.2.1/compose.yml
+curl -o .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.2.1/.env.example
 ```
 
 Two files is all you need — the image is prebuilt, so there's nothing to
@@ -115,7 +115,7 @@ release instead, so upgrading is something you choose rather than something a
 restart does to you:
 
 ```bash
-MINICHAT_TAG=v0.2.0
+MINICHAT_TAG=v0.2.1
 ```
 
 ### Build from source instead
@@ -291,11 +291,11 @@ registry.
 ### Publishing a release
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
-That publishes the image as `ghcr.io/scopeddlol/minichat:v0.2.0` (and `:0.2`)
+That publishes the image as `ghcr.io/scopeddlol/minichat:v0.2.1` (and `:0.2`)
 and opens a **draft** GitHub release with the Windows installers attached, for
 you to review before making it public.
 
