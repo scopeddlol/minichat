@@ -12,6 +12,7 @@ export default function VoiceStage() {
   const { participants, tracks, focusedIdentity, setFocus } = useVoice()
   const members = useStore((s) => s.members)
   const permissions = useStore((s) => s.permissions)
+  const isDirect = useVoice(s => s.channelId?.startsWith('direct:'))
 
   // A screen share takes over the stage, since that's what people came to see.
   const sharer = participants.find((p) => p.hasScreenShare)
@@ -42,7 +43,7 @@ export default function VoiceStage() {
             }
             member={members[focused.identity]}
             large
-            canModerate={can(permissions, P.MOVE_MEMBERS)}
+            canModerate={!isDirect && can(permissions, P.MOVE_MEMBERS)}
           />
           <button
             className="absolute top-2.5 right-2.5 btn btn-subtle !p-1.5"
@@ -71,7 +72,7 @@ export default function VoiceStage() {
               member={members[participant.identity]}
               compact={Boolean(focused)}
               onFocus={() => setFocus(participant.identity)}
-              canModerate={can(permissions, P.MOVE_MEMBERS)}
+              canModerate={!isDirect && can(permissions, P.MOVE_MEMBERS)}
             />
           ))}
       </div>

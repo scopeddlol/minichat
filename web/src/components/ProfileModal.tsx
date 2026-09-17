@@ -1,5 +1,6 @@
 import { Ban, Calendar, Gamepad2, Loader2, MessageSquare, Shield, UserMinus, UserPlus } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useInbox } from '../lib/direct'
 import { api } from '../lib/api'
 import { formatFullDate, formatRelative } from '../lib/format'
 import { can, P } from '../lib/perms'
@@ -178,6 +179,7 @@ export default function ProfileModal({
               </div>
             )}
 
+            {!isMe && <button className="btn btn-subtle w-full mt-5" onClick={() => void useInbox.getState().openPeer(userId).then(onClose).catch(e => toast.error(e.message))}><MessageSquare size={16}/>Message</button>}
             {(canManageRoles || canKick || canBan) && (
               <div className="mt-5 pt-4 border-t space-y-2">
                 {canManageRoles && (

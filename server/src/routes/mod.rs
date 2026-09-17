@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod auth_routes;
 pub mod channels;
+pub mod direct;
 pub mod emojis;
 pub mod instance;
 pub mod invites;
@@ -21,6 +22,17 @@ use crate::state::AppState;
 
 pub fn api_router() -> Router<AppState> {
     Router::new()
+        .route("/direct", get(direct::list))
+        .route("/direct/open/{peer}", post(direct::open))
+        .route(
+            "/direct/{id}/messages",
+            get(direct::history).post(direct::send),
+        )
+        .route("/direct/{id}/ack", post(direct::ack))
+        .route("/direct/{id}/call", post(direct::call))
+        .route("/direct/calls", get(direct::calls))
+        .route("/direct/calls/{id}", post(direct::action))
+        .route("/direct/calls/{id}/token", post(direct::token))
         // ---- public / unauthenticated ----
         .route("/meta", get(instance::meta))
         .route("/desktop/latest", get(instance::desktop_latest))

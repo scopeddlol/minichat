@@ -1,8 +1,9 @@
 import {
-  ChevronDown, Hash, Headphones, Megaphone, Mic, MicOff, Plus, ScreenShare, Settings,
+  MessageSquare, ChevronDown, Hash, Headphones, Megaphone, Mic, MicOff, Plus, ScreenShare, Settings,
   Shield, Sparkles, UserPlus, Video, Volume2, VolumeX, PhoneOff, Users,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { useInbox } from '../lib/direct'
 import { can, P } from '../lib/perms'
 import { useStore } from '../lib/store'
 import { useVoice } from '../lib/voice'
@@ -28,6 +29,9 @@ export default function Sidebar({
   onOpenProfile,
   onNavigate,
 }: SidebarProps) {
+  const inboxOpen = useInbox(s => s.open)
+  const conversations = useInbox(s => s.conversations)
+  const unreadDirect = conversations.reduce((n,c) => n + c.unread, 0)
   const instance = useStore((s) => s.instance)
   const channels = useStore((s) => s.channels)
   const categories = useStore((s) => s.categories)
@@ -63,6 +67,7 @@ export default function Sidebar({
     can(permissions, P.MANAGE_WEBHOOKS)
 
   const select = (channel: Channel) => {
+    useInbox.setState({ open: false })
     if (channel.kind === 'voice') {
       void joinVoice(channel)
       return
@@ -92,7 +97,7 @@ export default function Sidebar({
   }
 
   return (
-    <div className="h-full flex flex-col" style={{ background: 'var(--surface-0)' }}>
+    <div className="community-nav h-full min-h-0 flex flex-col" style={{ background: 'var(--surface-0)' }}>
       {/* Instance header */}
       <header
         className="px-3.5 h-14 flex items-center gap-2.5 border-b shrink-0"
@@ -123,8 +128,9 @@ export default function Sidebar({
         )}
       </header>
 
+      <div className="px-3 pt-4"><button className={`inbox-button ${inboxOpen ? 'selected' : ''}`} onClick={() => { useInbox.setState({ open: true }); onNavigate?.() }}><MessageSquare size={18}/><span className="flex-1 text-left">Direct messages</span>{unreadDirect > 0 && <span className="unread-dot">{unreadDirect > 99 ? '99+' : unreadDirect}</span>}</button><p className="navigation-label">COMMUNITY</p></div>
       {/* Channels */}
-      <nav className="flex-1 overflow-y-auto scroll-thin px-2 py-3 space-y-4">
+      <nav data-channel-list className="flex-1 min-h-0 overflow-y-auto scroll-thin px-2 py-3 space-y-4">
         {grouped.uncategorised.length > 0 && (
           <ChannelGroup
             channels={grouped.uncategorised}
@@ -233,6 +239,7 @@ function ChannelGroup({
         return (
           <div key={channel.id}>
             <button
+              data-channel-id={channel.id}
               onClick={() => onSelect(channel)}
               className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors group"
               style={{
@@ -294,6 +301,7 @@ function ChannelGroup({
                   return (
                     <button
                       key={vs.user_id}
+                      data-user-id={vs.user_id}
                       onClick={() => onOpenProfile(vs.user_id)}
                       className="w-full flex items-center gap-2 px-1.5 py-1 rounded-md transition-colors hover:bg-[var(--surface-1)]"
                     >

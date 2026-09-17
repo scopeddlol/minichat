@@ -269,7 +269,7 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
   }
 
   return (
-    <div className="px-3 sm:px-4 pb-3 pt-1 safe-bottom">
+    <div className="channel-composer shrink-0 px-3 sm:px-4 pb-3 pt-1 safe-bottom">
       {replyTo && (
         <div
           className="flex items-center gap-2 px-3 py-1.5 text-[0.8rem] rounded-t-xl border border-b-0 animate-fade-up"
@@ -526,7 +526,7 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
                 <div className="fixed inset-0 z-10" onClick={() => setEmojiOpen(false)} />
                 <div
                   className="absolute bottom-full right-0 mb-2 z-20 card p-2 animate-pop-in max-h-72 overflow-y-auto scroll-thin"
-                  style={{ width: 296, boxShadow: 'var(--shadow-lg)' }}
+                  style={{ width: 'min(296px, calc(100vw - 40px))', boxShadow: 'var(--shadow-lg)' }}
                 >
                   {emojis.length > 0 && (
                     <>

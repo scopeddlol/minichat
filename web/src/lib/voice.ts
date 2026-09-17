@@ -11,6 +11,7 @@ import {
 import { create } from 'zustand'
 import { api } from './api'
 import { gateway } from './gateway'
+import { direct } from './direct'
 import {
   captureOptions, loadScreenShareSettings, publishOptions, saveScreenShareSettings,
   type ScreenShareSettings,
@@ -222,6 +223,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
 
   async leave() {
     const room = get().room
+    const leavingChannel = get().channelId
     set({
       room: null,
       channelId: null,
@@ -242,6 +244,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
       }
     }
     gateway.send({ op: 'voice_state', channel_id: null })
+    if (leavingChannel?.startsWith('direct:')) await direct.action(leavingChannel.slice(7), 'end').catch(() => undefined)
   },
 
   async toggleMute() {
@@ -511,6 +514,7 @@ function syncParticipants(room: Room, set: Setter) {
 }
 
 function publishVoiceState(channelId: string, state: Partial<VoiceStore>) {
+  if (channelId.startsWith('direct:')) return
   gateway.send({
     op: 'voice_state',
     channel_id: channelId,

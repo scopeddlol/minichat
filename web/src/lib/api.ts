@@ -32,7 +32,7 @@ export function setToken(token: string | null) {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken()
   const headers = new Headers(init.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
@@ -212,7 +212,7 @@ export const api = {
       can_speak: boolean
       can_video: boolean
       can_screen_share: boolean
-    }>(`/voice/${channelId}/token`),
+    }>(channelId.startsWith('direct:') ? `/direct/calls/${channelId.slice(7)}/token` : `/voice/${channelId}/token`),
   voiceStates: () => get<VoiceState[]>('/voice/states'),
   forceDisconnect: (userId: string) => post<{ ok: boolean }>(`/voice/disconnect/${userId}`),
 
