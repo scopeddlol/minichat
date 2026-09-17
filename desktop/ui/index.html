@@ -115,13 +115,22 @@
     </main>
 
     <script type="module">
-      const invoke = window.__TAURI__?.core?.invoke
+      // Resolved at call time rather than captured once: the global is injected
+      // by Tauri before page scripts run, but looking it up lazily means a
+      // slow injection can never leave the button permanently dead.
+      const getInvoke = () => window.__TAURI__?.core?.invoke
+
       const form = document.getElementById('form')
       const input = document.getElementById('url')
       const submit = document.getElementById('submit')
       const error = document.getElementById('error')
 
+      const BRIDGE_MISSING =
+        "Couldn't reach the desktop app's internals. Try restarting MiniChat — if " +
+        'it keeps happening, this build is faulty; please report it.'
+
       // Pre-fill with the last instance so "Switch instance" starts from it.
+      const invoke = getInvoke()
       if (invoke) {
         try {
           const saved = await invoke('saved_instance')
@@ -129,15 +138,20 @@
         } catch {
           /* first run — nothing saved yet */
         }
+      } else {
+        error.textContent = BRIDGE_MISSING
       }
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault()
         error.textContent = ''
+
+        const invoke = getInvoke()
         if (!invoke) {
-          error.textContent = 'This page only works inside the MiniChat desktop app.'
+          error.textContent = BRIDGE_MISSING
           return
         }
+
         submit.disabled = true
         submit.textContent = 'Connecting…'
         try {

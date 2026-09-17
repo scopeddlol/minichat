@@ -175,6 +175,11 @@ npm run build
 On first launch the app asks for your instance address and remembers it.
 **File → Switch instance…** changes it later.
 
+If the connect screen says it can't reach the app's internals, the build was
+made without `withGlobalTauri` enabled in `desktop/tauri.conf.json` — the
+connect screen has no bundler, so it reads the injected `window.__TAURI__`
+global rather than importing the API.
+
 The desktop app also registers **global voice hotkeys**, so push-to-talk works
 while you're in a game or another window — something a browser tab fundamentally
 cannot do. Defaults are `F8` (push to talk), `F9` (mute) and `F10` (deafen);

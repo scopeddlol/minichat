@@ -4,12 +4,15 @@
 // app asks which instance to connect to on first launch, remembers it, and
 // from then on opens straight into that instance.
 
-#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 #[derive(Serialize, Deserialize)]
 struct Settings {
@@ -68,7 +71,8 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
         .path()
         .app_config_dir()
         .map_err(|e| format!("could not resolve the config directory: {e}"))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("could not create the config directory: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("could not create the config directory: {e}"))?;
     Ok(dir.join("settings.json"))
 }
 
@@ -105,8 +109,46 @@ fn normalise(url: &str) -> Result<String, String> {
     }
 }
 
+/// Whether the window is currently showing the app's own bundled page rather
+/// than a remote instance.
+///
+/// `withGlobalTauri` has to be on for the bundler-less connect screen to reach
+/// `invoke`, and that injects the API into every page the webview loads — the
+/// remote instance page included. Capabilities are scoped to local content, but
+/// rather than depend on that, the commands below check for themselves. Cheap,
+/// and it holds regardless of how the ACL treats application commands.
+///
+/// Deliberately permissive when the URL can't be read: failing closed here
+/// would brick the connect screen, which is worse than what this guards
+/// against (a hostile instance page changing which instance opens next).
+fn is_app_page(window: &WebviewWindow) -> bool {
+    match window.url() {
+        Ok(url) => {
+            // tauri://localhost on macOS and Linux, http://tauri.localhost on
+            // Windows, and a localhost dev server if one is ever used.
+            url.scheme() == "tauri"
+                || matches!(
+                    url.host_str(),
+                    Some("tauri.localhost") | Some("localhost") | Some("127.0.0.1") | None
+                )
+        }
+        Err(_) => true,
+    }
+}
+
+fn require_app_page(app: &AppHandle) -> Result<WebviewWindow, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is missing".to_string())?;
+    if !is_app_page(&window) {
+        return Err("That action is only available on the connect screen.".into());
+    }
+    Ok(window)
+}
+
 #[tauri::command]
 fn saved_instance(app: AppHandle) -> Option<String> {
+    require_app_page(&app).ok()?;
     load_settings(&app).instance_url
 }
 
@@ -129,8 +171,8 @@ fn forward_hotkey(app: &AppHandle, action: &str, active: bool) {
 /// Every failure here is non-fatal: a shortcut another application already
 /// owns should cost you that one key, not the whole app.
 fn register_hotkeys(app: &AppHandle) {
-    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
     use std::str::FromStr;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
     let settings = load_settings(app);
     let hotkeys = settings.hotkeys;
@@ -173,14 +215,14 @@ fn register_hotkeys(app: &AppHandle) {
 
 #[tauri::command]
 fn connect(app: AppHandle, url: String) -> Result<String, String> {
+    // Checked before anything is written, so a rejected call leaves no trace.
+    let window = require_app_page(&app)?;
+
     let url = normalise(&url)?;
     let mut settings = load_settings(&app);
     settings.instance_url = Some(url.clone());
     store_settings(&app, &settings)?;
 
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "main window is missing".to_string())?;
     let parsed = url
         .parse()
         .map_err(|_| "That doesn't look like a valid address.".to_string())?;
@@ -191,14 +233,33 @@ fn connect(app: AppHandle, url: String) -> Result<String, String> {
     Ok(url)
 }
 
-fn show_connect_screen(app: &AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        let url = "tauri://localhost/index.html"
-            .parse()
-            .map_err(|_| "invalid local url".to_string())?;
-        window.navigate(url).map_err(|e| e.to_string())?;
+/// Open the main window, replacing it if one already exists.
+///
+/// Going through `WebviewUrl::App` rather than a literal URL matters: the
+/// scheme Tauri serves the bundled app from differs by platform
+/// (`tauri://localhost` on macOS and Linux, `http://tauri.localhost` on
+/// Windows), so any hardcoded address is wrong somewhere.
+fn open_main_window(app: &AppHandle, target: WebviewUrl) -> tauri::Result<()> {
+    if let Some(existing) = app.get_webview_window("main") {
+        existing.destroy()?;
     }
+
+    WebviewWindowBuilder::new(app, "main", target)
+        .title("MiniChat")
+        .inner_size(1180.0, 820.0)
+        .min_inner_size(420.0, 520.0)
+        .center()
+        // The web app looks for this to offer desktop-specific help.
+        .user_agent(&format!(
+            "Mozilla/5.0 MiniChat/{} Desktop",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .build()?;
     Ok(())
+}
+
+fn show_connect_screen(app: &AppHandle) -> Result<(), String> {
+    open_main_window(app, WebviewUrl::App("index.html".into())).map_err(|e| e.to_string())
 }
 
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
@@ -294,17 +355,7 @@ fn main() {
                 _ => WebviewUrl::App("index.html".into()),
             };
 
-            WebviewWindowBuilder::new(app, "main", target)
-                .title("MiniChat")
-                .inner_size(1180.0, 820.0)
-                .min_inner_size(420.0, 520.0)
-                .center()
-                // The web app looks for this to offer desktop-specific help.
-                .user_agent(&format!(
-                    "Mozilla/5.0 MiniChat/{} Desktop",
-                    env!("CARGO_PKG_VERSION")
-                ))
-                .build()?;
+            open_main_window(&handle, target)?;
 
             build_menu(&handle)?;
             register_hotkeys(&handle);
