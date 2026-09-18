@@ -89,8 +89,7 @@ export function formatSlowmode(seconds: number): string {
 export function avatarGradient(id: string, accent: string): string {
   let hash = 0
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0
-  const angle = hash % 360
-  return `linear-gradient(135deg, ${accent} 0%, hsl(${angle} 62% 52%) 100%)`
+  return `color-mix(in oklab, ${accent} 12%, hsl(220 4% ${30 + hash % 9}%))`
 }
 
 export function initials(name: string): string {

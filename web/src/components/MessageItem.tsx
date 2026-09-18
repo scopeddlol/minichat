@@ -3,6 +3,7 @@ import {
 } from 'lucide-react'
 import { memo, useState } from 'react'
 import { api } from '../lib/api'
+import { showContextMenu, type ContextAction } from '../lib/context'
 import {
   formatBytes, formatTime, formatTimestamp, isAudio, isImage, isVideo,
 } from '../lib/format'
@@ -122,8 +123,28 @@ function MessageItemInner({
 
   const jumbo = isJumboEmoji(message.content) && !message.attachments.length
 
+  const contextActions = (): ContextAction[] => [
+    { label: 'Reply', run: () => onReply(message) },
+    { label: 'Copy text', run: () => navigator.clipboard.writeText(message.content) },
+    ...(isMine && !message.pending ? [{ label: 'Edit message', run: () => setEditing(true) }] : []),
+    ...(canPin ? [{ label: message.pinned ? 'Unpin message' : 'Pin message', run: () => message.pinned ? api.unpinMessage(message.id) : api.pinMessage(message.id) }] : []),
+    ...(canDelete ? [{ label: 'Delete message', run: remove }] : []),
+  ]
+
   return (
     <article
+      tabIndex={0}
+      onContextMenu={event => {
+        if ((event.target as HTMLElement).closest('[data-user-id],textarea,input')) return
+        event.preventDefault(); event.stopPropagation()
+        showContextMenu({ x: event.clientX, y: event.clientY, title: 'Message', items: contextActions(), trigger: event.currentTarget })
+      }}
+      onKeyDown={event => {
+        if (event.target !== event.currentTarget || !(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return
+        event.preventDefault(); event.stopPropagation()
+        const rect = event.currentTarget.getBoundingClientRect()
+        showContextMenu({ x: rect.left + 24, y: rect.bottom, title: 'Message', items: contextActions(), trigger: event.currentTarget })
+      }}
       className="chat-message group relative px-4 transition-colors"
       style={{
         background: highlight

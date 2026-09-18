@@ -108,6 +108,8 @@ interface VoiceStore {
 }
 
 const trackKey = (identity: string, source: Track.Source) => `${identity}:${source}`
+let joinAttempt = 0
+let pendingRoom: Room | null = null
 
 export const useVoice = create<VoiceStore>((set, get) => ({
   room: null,
@@ -143,11 +145,13 @@ export const useVoice = create<VoiceStore>((set, get) => ({
     if (get().connecting) return
     if (get().channelId === channelId && get().connected) return
     if (get().room) await get().leave()
+    const attempt = ++joinAttempt
 
     set({ connecting: true, error: '', channelId })
 
     try {
       const grant = await api.voiceToken(channelId)
+      if (attempt !== joinAttempt) return
       const room = new Room({
         adaptiveStream: true,
         dynacast: true,
@@ -164,8 +168,11 @@ export const useVoice = create<VoiceStore>((set, get) => ({
         },
       })
 
+      pendingRoom = room
       wireEvents(room, set, get)
       await room.connect(grant.url, grant.token)
+      if (attempt !== joinAttempt) { await room.disconnect(); return }
+      pendingRoom = null
 
       set({
         room,
@@ -211,6 +218,9 @@ export const useVoice = create<VoiceStore>((set, get) => ({
       syncParticipants(room, set)
       publishVoiceState(channelId, get())
     } catch (error) {
+      if (attempt !== joinAttempt) return
+      await pendingRoom?.disconnect().catch(() => undefined)
+      pendingRoom = null
       set({
         connecting: false,
         connected: false,
@@ -222,6 +232,9 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   },
 
   async leave() {
+    ++joinAttempt
+    const pending = pendingRoom
+    pendingRoom = null
     const room = get().room
     const leavingChannel = get().channelId
     set({
@@ -243,6 +256,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
         /* already gone */
       }
     }
+    if (pending && pending !== room) await pending.disconnect().catch(() => undefined)
     gateway.send({ op: 'voice_state', channel_id: null })
     if (leavingChannel?.startsWith('direct:')) await direct.action(leavingChannel.slice(7), 'end').catch(() => undefined)
   },
@@ -486,10 +500,14 @@ function wireEvents(room: Room, set: Setter, get: () => VoiceStore) {
       },
     )
     .on(RoomEvent.Disconnected, () => {
+      if (get().room !== room) return
+      const disconnectedChannel = get().channelId
       set({ connected: false, room: null, channelId: null, participants: [], tracks: {} })
       gateway.send({ op: 'voice_state', channel_id: null })
+      if (disconnectedChannel?.startsWith('direct:')) void direct.action(disconnectedChannel.slice(7), 'end').catch(() => undefined)
     })
     .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
+      if (get().room !== room) return
       set({ connected: state === ConnectionState.Connected })
     })
 }

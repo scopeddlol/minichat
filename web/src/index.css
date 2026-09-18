@@ -13,7 +13,7 @@ img, video { max-width: 100%; }
 .community-nav [data-channel-id] { padding: 11px 12px; border-radius: 7px; gap: 10px; }
 .community-nav [data-channel-id]:focus-visible { outline-offset: -2px; }
 .chat-main > header { height: 76px; padding-inline: clamp(16px, 3vw, 32px); gap: 12px; }
-.chat-main > header > h1 { max-width: min(32vw, 260px); }
+.chat-main > header > h1 { max-width: min(32vw, 260px); flex-shrink: 0; }
 .member-panel > header { padding: 20px 16px; }
 .member-panel [data-user-id] { padding: 10px 8px; }
 .inbox-button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; border-radius: 7px; color: var(--text-muted); cursor: pointer; }
@@ -49,12 +49,14 @@ img, video { max-width: 100%; }
 .chat-message { padding-inline: clamp(16px, 3vw, 32px); }
 .channel-composer { padding: 16px clamp(16px, 3vw, 32px) max(20px, env(safe-area-inset-bottom)); }
 @media (max-width: 1023px) {
-  .inbox-list { width: 220px; }
+  .inbox-list { width: 100%; border: 0; }
+  .inbox-list-selected, .inbox-thread-empty { display: none; }
   .workspace-header { padding-inline: 16px; }
 }
 @media (max-width: 767px) {
+  .mobile-channel-drawer .community-nav > header { padding-right: 58px; }
   .chat-main > header { height: 64px; padding-inline: 12px; gap: 8px; }
-  .chat-main > header > h1 { max-width: none; flex: 1; }
+  .chat-main > header > h1 { max-width: none; flex: 1; flex-shrink: 1; }
   .inbox-list { width: 100%; border: 0; }
   .inbox-list-selected, .inbox-thread-empty { display: none; }
   .direct-composer { margin-bottom: max(16px, env(safe-area-inset-bottom)); }

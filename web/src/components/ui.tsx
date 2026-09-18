@@ -126,14 +126,32 @@ export function Modal({
   bare?: boolean
 }) {
   const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const previous = document.activeElement as HTMLElement | null
+    dialogRef.current?.focus()
+    return () => { if (previous?.isConnected) previous.focus() }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll('[role="dialog"]')
+      if (dialogs[dialogs.length - 1] !== dialogRef.current) return
+      if (event.key === 'Tab') {
+        const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]') ?? [])].filter(el => el.getClientRects().length > 0)
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (!first) { event.preventDefault(); dialogRef.current?.focus(); return }
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) { event.preventDefault(); last.focus() }
+        else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialogRef.current)) { event.preventDefault(); first.focus() }
+      }
       if (event.key !== 'Escape') return
       // A dropdown open inside the modal owns Escape first — dismissing a
       // picker shouldn't also throw away the dialog you were filling in.
-      if (document.querySelector('[role="listbox"]')) return
+      if (document.querySelector('[role="listbox"], [role="menu"]')) return
       onClose()
     }
     document.addEventListener('keydown', onKey)
@@ -165,6 +183,8 @@ export function Modal({
     >
       <div
         role="dialog"
+        ref={dialogRef}
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
         className="w-full card animate-pop-in flex flex-col max-h-[90vh] overflow-hidden"

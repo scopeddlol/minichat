@@ -165,7 +165,7 @@ export default function Chat() {
       {sidebarOpen && (
         <div className="md:hidden fixed inset-0 z-40 flex">
           <div className="absolute inset-0 bg-black/55 animate-fade-in" onClick={() => setSidebarOpen(false)} />
-          <div className="relative w-[82vw] max-w-72 h-full animate-slide-in-right" style={{ transform: 'none' }}>
+          <div className="mobile-channel-drawer relative w-[82vw] max-w-72 h-full animate-slide-in-right" style={{ transform: 'none' }}>
             <button
               className="btn btn-subtle !p-1.5 absolute top-2.5 right-2.5 z-10"
               onClick={() => setSidebarOpen(false)}
