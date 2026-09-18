@@ -137,10 +137,19 @@ export const api = {
     put<{ ok: boolean }>(`/channels/${id}/overwrites`, { role_id, allow, deny }),
 
   categories: () => get<Category[]>('/categories'),
-  createCategory: (name: string) => post<Category>('/categories', { name }),
-  updateCategory: (id: string, name: string, position: number) =>
-    patch<Category>(`/categories/${id}`, { name, position }),
+  createCategory: (payload: {
+    name: string
+    position?: number
+    is_private?: boolean
+    allowed_role_ids?: string[]
+  }) => post<Category>('/categories', payload),
+  updateCategory: (
+    id: string,
+    payload: { name: string; position?: number; is_private?: boolean; allowed_role_ids?: string[] },
+  ) => patch<Category>(`/categories/${id}`, payload),
   deleteCategory: (id: string) => del<{ ok: boolean }>(`/categories/${id}`),
+  /** Which roles can see a channel or a category. Same endpoint for both. */
+  allowedRoles: (id: string) => get<{ role_ids: string[] }>(`/access/${id}/roles`),
 
   messages: (
     channelId: string,

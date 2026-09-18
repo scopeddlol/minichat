@@ -46,6 +46,8 @@ export interface Category {
   id: string
   name: string
   position: number
+  /** Hides the category and every channel synced to it. */
+  is_private: boolean
 }
 
 export interface Channel {
@@ -63,6 +65,8 @@ export interface Channel {
   emoji: string
   /** A short line under the channel name in the sidebar. */
   description: string
+  /** Whether this channel's permissions are a copy of its category's. */
+  sync_category: boolean
 }
 
 export interface Attachment {

@@ -542,48 +542,77 @@ pub async fn create_category(
     Ok(Json(json!(category)))
 }
 
+/// PATCH input: every field optional.
+///
+/// A rename must not be able to un-private a category. `is_private` and
+/// `allowed_role_ids` are only touched when they are actually sent, because
+/// `#[serde(default)]` on a bool would quietly turn "rename this" into
+/// "rename this and open it to everyone", and the overwrite replacement below
+/// would then wipe the permissions of every channel synced to it.
+#[derive(Deserialize)]
+pub struct UpdateCategoryInput {
+    pub name: Option<String>,
+    pub position: Option<i64>,
+    pub is_private: Option<bool>,
+    pub allowed_role_ids: Option<Vec<String>>,
+}
+
 pub async fn update_category(
     State(state): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
-    Json(input): Json<CategoryInput>,
+    Json(input): Json<UpdateCategoryInput>,
 ) -> AppResult<Json<Value>> {
     auth.require(perms::MANAGE_CHANNELS)?;
-    let name = validate::text(&input.name, "Category name", 1, 48)?;
-    let position = input.position.unwrap_or(0);
+    let mut category: Category = sqlx::query_as("SELECT * FROM categories WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Category not found."))?;
+
+    if let Some(name) = &input.name {
+        category.name = validate::text(name, "Category name", 1, 48)?;
+    }
+    if let Some(position) = input.position {
+        category.position = position;
+    }
+    if let Some(is_private) = input.is_private {
+        category.is_private = is_private;
+    }
+
     sqlx::query("UPDATE categories SET name = ?, position = ?, is_private = ? WHERE id = ?")
-        .bind(&name)
-        .bind(position)
-        .bind(input.is_private)
+        .bind(&category.name)
+        .bind(category.position)
+        .bind(category.is_private)
         .bind(&id)
         .execute(&state.db)
         .await?;
 
     // The role list is the whole truth about a private category, so replace
-    // rather than merge: a role dropped from the list must lose access.
-    sqlx::query("DELETE FROM category_overwrites WHERE category_id = ?")
-        .bind(&id)
-        .execute(&state.db)
-        .await?;
-    if input.is_private {
-        write_private_overwrites(&state, Scope::Category, &id, &input.allowed_role_ids).await?;
+    // rather than merge: a role dropped from the list must lose access. Only
+    // when a list was actually sent, or when privacy was just switched off.
+    let rewrite_access = input.allowed_role_ids.is_some() || input.is_private == Some(false);
+    if rewrite_access {
+        sqlx::query("DELETE FROM category_overwrites WHERE category_id = ?")
+            .bind(&id)
+            .execute(&state.db)
+            .await?;
+        if category.is_private {
+            let allowed = input.allowed_role_ids.clone().unwrap_or_default();
+            write_private_overwrites(&state, Scope::Category, &id, &allowed).await?;
+        }
     }
-
-    let category = Category {
-        id: id.clone(),
-        name,
-        position,
-        is_private: input.is_private,
-    };
 
     // Every synced channel inherits the new answer, and clients need telling:
     // a member who just lost access should stop seeing the channel without
-    // having to reload.
-    for channel in resync_category(&state, &id).await? {
-        state.emit_all(
-            "CHANNEL_UPDATE",
-            serde_json::to_value(&channel).unwrap_or(Value::Null),
-        );
+    // having to reload. Skipped for a plain rename, which changes no access.
+    if rewrite_access {
+        for channel in resync_category(&state, &id).await? {
+            state.emit_all(
+                "CHANNEL_UPDATE",
+                serde_json::to_value(&channel).unwrap_or(Value::Null),
+            );
+        }
     }
 
     access::audit(

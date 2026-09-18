@@ -45,14 +45,14 @@ echo
 echo "=== private channel admitting only Staff ==="
 PRIV=$(curl -s -X POST $API/channels -H "authorization: Bearer $OP" -H 'content-type: application/json' -d "{\"name\":\"Staff Room\",\"kind\":\"text\",\"is_private\":true,\"allowed_role_ids\":[\"$STAFF\"]}" | j id)
 echo "created: $PRIV"
-echo "member sees:   $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 -c "import sys,json;print([c['name'] for c in json.load(sys.stdin)])")"
+echo "member sees:   $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 "$(dirname "$0")/mapnames.py")"
 echo "allowed roles: $(curl -s $API/access/$PRIV/roles -H "authorization: Bearer $OP")"
 
 echo
 echo "=== give the member Staff; they should now see it ==="
 MEMID=$(curl -s $API/auth/me -H "authorization: Bearer $MEM" | j id)
 curl -s -X PUT $API/admin/members/$MEMID/roles/$STAFF -H "authorization: Bearer $OP" -o /dev/null -w "  add role: %{http_code}\n"
-echo "member sees:   $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 -c "import sys,json;print([c['name'] for c in json.load(sys.stdin)])")"
+echo "member sees:   $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 "$(dirname "$0")/mapnames.py")"
 
 echo
 echo "=== private CATEGORY admitting only Staff, with a synced channel ==="
@@ -64,17 +64,33 @@ import sys,json
 for c in json.load(sys.stdin):
     if c['id']=='$SYNCED': print('  sync_category =', c['sync_category'])
 "
-echo "member (has Staff) sees: $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 -c "import sys,json;print([c['name'] for c in json.load(sys.stdin)])")"
+echo "member (has Staff) sees: $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 "$(dirname "$0")/mapnames.py")"
 
 echo
 echo "=== drop Staff from the category; the synced channel must follow ==="
 curl -s -X PATCH $API/categories/$CAT -H "authorization: Bearer $OP" -H 'content-type: application/json' -d '{"name":"Staff Area","is_private":true,"allowed_role_ids":[]}' -o /dev/null -w "  patch: %{http_code}\n"
-echo "member sees: $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 -c "import sys,json;print([c['name'] for c in json.load(sys.stdin)])")"
+echo "member sees: $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 "$(dirname "$0")/mapnames.py")"
 echo "  (Planning Notes should be gone; Staff Room should remain)"
 
 echo
 echo "=== unsync the channel, then re-open the category: channel stays shut ==="
 curl -s -X PATCH $API/channels/$SYNCED -H "authorization: Bearer $OP" -H 'content-type: application/json' -d '{"sync_category":false}' -o /dev/null -w "  unsync: %{http_code}\n"
 curl -s -X PATCH $API/categories/$CAT -H "authorization: Bearer $OP" -H 'content-type: application/json' -d "{\"name\":\"Staff Area\",\"is_private\":true,\"allowed_role_ids\":[\"$STAFF\"]}" -o /dev/null -w "  reopen category: %{http_code}\n"
-echo "member sees: $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 -c "import sys,json;print([c['name'] for c in json.load(sys.stdin)])")"
+echo "member sees: $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 "$(dirname "$0")/mapnames.py")"
 echo "  (Planning Notes should still be hidden - it no longer inherits)"
+
+echo
+echo "=== a plain rename must not open a private category ==="
+# Put the synced channel back under the category's control first.
+curl -s -X PATCH $API/channels/$SYNCED -H "authorization: Bearer $OP" -H 'content-type: application/json' -d '{"sync_category":true}' -o /dev/null
+echo "member sees (Staff allowed): $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 "$(dirname "$0")/mapnames.py")"
+# Rename only. `is_private` and `allowed_role_ids` are absent on purpose: this
+# is the call the admin panel's inline rename makes.
+curl -s -X PATCH $API/categories/$CAT -H "authorization: Bearer $OP" -H 'content-type: application/json' -d '{"name":"Renamed Area"}' -o /dev/null -w "  rename: %{http_code}\n"
+echo "category is_private after rename: $(curl -s $API/categories -H "authorization: Bearer $OP" | python3 -c "
+import sys,json
+for c in json.load(sys.stdin):
+    if c['id']=='$CAT': print(c['is_private'], repr(c['name']))
+")"
+echo "member sees: $(curl -s $API/channels -H "authorization: Bearer $MEM" | python3 "$(dirname "$0")/mapnames.py")"
+echo "  (Planning Notes must STILL be visible: rename changed nothing about access)"
