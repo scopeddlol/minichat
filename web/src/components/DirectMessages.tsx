@@ -98,7 +98,7 @@ export default function DirectMessages() {
             a.id.localeCompare(b.id),
           ),
         )
-      setDrafts((d) => ({ ...d, [id]: '' }))
+      setDrafts((d) => d[id] === content ? { ...d, [id]: '' } : d)
       requestAnimationFrame(() => {
         if (list.current) list.current.scrollTop = list.current.scrollHeight
       })

@@ -8,6 +8,8 @@
 - Private audio/video calls with incoming-call prompts, accept/decline/cancel/end controls, microphone, camera, and screen sharing through the existing LiveKit service. Unanswered calls expire after 45 seconds.
 - Responsive inbox navigation, viewport-clamped context menus, bounded dialogs, and fixes for overflowing reply previews and long channel names.
 - Membership checks isolate direct conversations and call tokens from community roles, including administrators. Existing channel data is preserved by an additive SQLite migration.
+- Friends, favourites, blocking, profile image framing, message forwarding, and message links are included alongside category permission inheritance and channel overrides.
+- Blocking ends active private calls and prevents new contact. Permission changes refresh connected clients and hide inaccessible channel/category metadata and voice presence.
 
 ### Deployment
 
