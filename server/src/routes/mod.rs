@@ -6,6 +6,7 @@ pub mod instance;
 pub mod invites;
 pub mod messages;
 pub mod notifications;
+pub mod relationships;
 pub mod setup;
 pub mod snapshot;
 pub mod uploads;
@@ -36,6 +37,24 @@ pub fn api_router() -> Router<AppState> {
         .route("/users/@me", patch(users::update_me))
         .route("/users/{id}", get(users::get_user))
         .route("/members", get(users::list_members))
+        // ---- friends and favourites ----
+        .route(
+            "/relationships",
+            get(relationships::list).post(relationships::add_friend),
+        )
+        .route(
+            "/relationships/{user_id}",
+            axum::routing::delete(relationships::remove_friend),
+        )
+        .route("/relationships/block", post(relationships::block))
+        .route(
+            "/relationships/block/{user_id}",
+            axum::routing::delete(relationships::unblock),
+        )
+        .route(
+            "/favourites/{user_id}",
+            put(relationships::favourite).delete(relationships::unfavourite),
+        )
         // ---- channels ----
         .route(
             "/channels",

@@ -51,6 +51,41 @@ pub struct UserRow {
     pub accepted_rules: bool,
     pub created_at: String,
     pub last_seen_at: String,
+    pub avatar_x: f64,
+    pub avatar_y: f64,
+    pub avatar_zoom: f64,
+    pub banner_x: f64,
+    pub banner_y: f64,
+    pub banner_zoom: f64,
+}
+
+/// How a member framed one of their images.
+///
+/// `x`/`y` are the focal point as a percentage of the image, `zoom` a scale
+/// factor. Kept as numbers rather than baked into the uploaded file so
+/// re-framing costs no upload and the original is never degraded.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ImageFrame {
+    pub x: f64,
+    pub y: f64,
+    pub zoom: f64,
+}
+
+impl ImageFrame {
+    /// Centred and unzoomed — what an unframed image looks like.
+    pub fn clamped(x: f64, y: f64, zoom: f64) -> Self {
+        Self {
+            x: x.clamp(0.0, 100.0),
+            y: y.clamp(0.0, 100.0),
+            // Zooming out below 1 would letterbox the frame; 4x is already
+            // well past where any reasonable upload stays sharp.
+            zoom: if zoom.is_finite() {
+                zoom.clamp(1.0, 4.0)
+            } else {
+                1.0
+            },
+        }
+    }
 }
 
 /// What every other member is allowed to see about a user.
@@ -72,10 +107,14 @@ pub struct PublicUser {
     pub created_at: String,
     pub last_seen_at: String,
     pub roles: Vec<String>,
+    pub avatar_frame: ImageFrame,
+    pub banner_frame: ImageFrame,
 }
 
 impl UserRow {
     pub fn public(self, roles: Vec<String>) -> PublicUser {
+        let avatar_frame = ImageFrame::clamped(self.avatar_x, self.avatar_y, self.avatar_zoom);
+        let banner_frame = ImageFrame::clamped(self.banner_x, self.banner_y, self.banner_zoom);
         PublicUser {
             id: self.id,
             username: self.username,
@@ -93,6 +132,8 @@ impl UserRow {
             created_at: self.created_at,
             last_seen_at: self.last_seen_at,
             roles,
+            avatar_frame,
+            banner_frame,
         }
     }
 }

@@ -22,6 +22,17 @@ pub struct UpdateMeInput {
     pub banner_url: Option<String>,
     pub email: Option<String>,
     pub accept_rules: Option<bool>,
+    /// Where the member dragged each image to, and how far they zoomed in.
+    /// Sent as `{ x, y, zoom }`; clamped server-side.
+    pub avatar_frame: Option<FrameInput>,
+    pub banner_frame: Option<FrameInput>,
+}
+
+#[derive(Deserialize)]
+pub struct FrameInput {
+    pub x: f64,
+    pub y: f64,
+    pub zoom: f64,
 }
 
 pub async fn update_me(
@@ -51,9 +62,34 @@ pub async fn update_me(
     }
     if let Some(v) = &input.avatar_url {
         user.avatar_url = validate::safe_url(v, "Avatar")?;
+        // A replaced image has nothing to do with how the last one was
+        // framed, so start it centred rather than inheriting a crop that was
+        // chosen for a different picture.
+        if input.avatar_frame.is_none() {
+            user.avatar_x = 50.0;
+            user.avatar_y = 50.0;
+            user.avatar_zoom = 1.0;
+        }
     }
     if let Some(v) = &input.banner_url {
         user.banner_url = validate::safe_url(v, "Banner")?;
+        if input.banner_frame.is_none() {
+            user.banner_x = 50.0;
+            user.banner_y = 50.0;
+            user.banner_zoom = 1.0;
+        }
+    }
+    if let Some(v) = &input.avatar_frame {
+        let frame = crate::models::ImageFrame::clamped(v.x, v.y, v.zoom);
+        user.avatar_x = frame.x;
+        user.avatar_y = frame.y;
+        user.avatar_zoom = frame.zoom;
+    }
+    if let Some(v) = &input.banner_frame {
+        let frame = crate::models::ImageFrame::clamped(v.x, v.y, v.zoom);
+        user.banner_x = frame.x;
+        user.banner_y = frame.y;
+        user.banner_zoom = frame.zoom;
     }
     if let Some(v) = &input.email {
         let email = if v.trim().is_empty() {
@@ -85,7 +121,9 @@ pub async fn update_me(
     sqlx::query(
         "UPDATE users SET display_name = ?, bio = ?, pronouns = ?, favorite_game = ?,
                 accent_color = ?, custom_status = ?, avatar_url = ?, banner_url = ?,
-                email = ?, accepted_rules = ?
+                email = ?, accepted_rules = ?,
+                avatar_x = ?, avatar_y = ?, avatar_zoom = ?,
+                banner_x = ?, banner_y = ?, banner_zoom = ?
          WHERE id = ?",
     )
     .bind(&user.display_name)
@@ -98,6 +136,12 @@ pub async fn update_me(
     .bind(&user.banner_url)
     .bind(&user.email)
     .bind(user.accepted_rules)
+    .bind(user.avatar_x)
+    .bind(user.avatar_y)
+    .bind(user.avatar_zoom)
+    .bind(user.banner_x)
+    .bind(user.banner_y)
+    .bind(user.banner_zoom)
     .bind(auth.id())
     .execute(&state.db)
     .await?;
