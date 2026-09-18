@@ -316,6 +316,7 @@ export default function Composer({ channel, channelPermissions, replyTo, onCance
                     id={choice.member.id}
                     name={choice.member.display_name}
                     src={choice.member.avatar_url}
+                    frame={choice.member.avatar_frame}
                     accent={choice.member.accent_color}
                     size="sm"
                   />

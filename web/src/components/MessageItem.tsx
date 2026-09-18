@@ -231,6 +231,7 @@ function MessageItemInner({
               id={replyTarget.author?.id ?? 'x'}
               name={replyTarget.author?.display_name ?? '?'}
               src={replyTarget.author?.avatar_url}
+              frame={replyTarget.author ? members[replyTarget.author.id]?.avatar_frame : undefined}
               accent={replyTarget.author?.accent_color}
               size="xs"
               className="!w-4 !h-4"
@@ -264,6 +265,7 @@ function MessageItemInner({
                   id={author?.id ?? 'deleted'}
                   name={displayName}
                   src={author?.avatar_url}
+                  frame={author ? members[author.id]?.avatar_frame : undefined}
                   accent={author?.accent_color}
                   size="md"
                 />

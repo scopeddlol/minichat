@@ -1,11 +1,14 @@
-import { Ban, Calendar, Gamepad2, Loader2, MessageSquare, Shield, UserMinus, UserPlus } from 'lucide-react'
+import {
+  Ban, Calendar, Check, Clock, Gamepad2, Loader2, MessageSquare, Shield, Star, UserMinus,
+  UserPlus, UserX, X,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { formatFullDate, formatRelative } from '../lib/format'
 import { can, P } from '../lib/perms'
 import { useStore } from '../lib/store'
-import type { Member } from '../lib/types'
-import { Avatar, Badge, Modal, Spinner, toast, useConfirm } from './ui'
+import type { Member, RelationshipKind } from '../lib/types'
+import { Avatar, Badge, frameStyle, Modal, RoleFlair, Spinner, toast, useConfirm } from './ui'
 
 export default function ProfileModal({
   userId,
@@ -20,6 +23,8 @@ export default function ProfileModal({
   const roles = useStore((s) => s.roles)
   const me = useStore((s) => s.me)
   const permissions = useStore((s) => s.permissions)
+  const relationship = useStore((s) => (userId ? s.relationships[userId] : undefined))
+  const refreshRelationships = useStore((s) => s.refreshRelationships)
   const confirm = useConfirm()
 
   const [member, setMember] = useState<Member | null>(cached ?? null)
@@ -76,13 +81,27 @@ export default function ProfileModal({
       ) : (
         <div>
           <div
-            className="h-24 relative"
+            className="h-32 relative overflow-hidden"
             style={{
               background: member.banner_url
-                ? `url(${member.banner_url}) center/cover`
+                ? undefined
                 : `linear-gradient(135deg, ${member.accent_color}, color-mix(in oklab, ${member.accent_color} 40%, var(--surface-3)))`,
             }}
-          />
+          >
+            {member.banner_url && (
+              <img
+                src={member.banner_url}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover"
+                style={frameStyle(member.banner_frame)}
+              />
+            )}
+            {/* Keeps the name legible over a bright or busy banner. */}
+            <div
+              className="absolute inset-x-0 bottom-0 h-16 pointer-events-none"
+              style={{ background: 'linear-gradient(to top, var(--surface-1), transparent)' }}
+            />
+          </div>
 
           <div className="px-5 pb-5 -mt-10">
             <div className="flex items-end justify-between gap-3 mb-3">
@@ -94,12 +113,45 @@ export default function ProfileModal({
                   accent={member.accent_color}
                   size="xl"
                   presence={member.presence}
+                  frame={member.avatar_frame}
                 />
               </div>
-              {isMe && (
+              {isMe ? (
                 <button className="btn btn-subtle" onClick={() => { onClose(); onEditProfile() }}>
                   Edit profile
                 </button>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    className="btn btn-ghost !p-2"
+                    disabled={busy}
+                    title={relationship?.favourite ? 'Remove favourite' : 'Favourite'}
+                    aria-label={relationship?.favourite ? 'Remove favourite' : 'Favourite'}
+                    onClick={() =>
+                      void act(
+                        relationship?.favourite ? 'Removed from favourites.' : 'Added to favourites.',
+                        async () => {
+                          if (relationship?.favourite) await api.unfavourite(member.id)
+                          else await api.favourite(member.id)
+                          await refreshRelationships()
+                        },
+                      )
+                    }
+                  >
+                    <Star
+                      size={16}
+                      style={{ color: relationship?.favourite ? 'var(--warning)' : undefined }}
+                      fill={relationship?.favourite ? 'var(--warning)' : 'none'}
+                    />
+                  </button>
+                  <FriendButton
+                    member={member}
+                    relationship={relationship?.kind ?? 'none'}
+                    busy={busy}
+                    act={act}
+                    refresh={refreshRelationships}
+                  />
+                </div>
               )}
             </div>
 
@@ -107,6 +159,7 @@ export default function ProfileModal({
               <h2 className="text-lg font-semibold" style={{ color: topColor ?? 'var(--text)' }}>
                 {member.display_name}
               </h2>
+              <RoleFlair roles={roles} memberRoleIds={member.roles} />
               {member.is_operator && <Badge color="var(--accent)">Operator</Badge>}
               {member.is_suspended && <Badge color="var(--danger)">Suspended</Badge>}
             </div>
@@ -175,6 +228,31 @@ export default function ProfileModal({
                     </span>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {!isMe && relationship?.kind !== 'blocked' && (
+              <div className="mt-5 pt-4 border-t" style={{ borderColor: 'var(--border-soft)' }}>
+                <button
+                  className="btn btn-ghost w-full !justify-start"
+                  disabled={busy}
+                  style={{ color: 'var(--danger)' }}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: `Block ${member.display_name}?`,
+                      body: "They won't be able to send you a friend request, and any friendship ends.",
+                      confirmLabel: 'Block',
+                      danger: true,
+                    })
+                    if (!ok) return
+                    await act('Blocked.', async () => {
+                      await api.blockUser(member.id)
+                      await refreshRelationships()
+                    })
+                  }}
+                >
+                  <UserX size={15} /> Block {member.display_name}
+                </button>
               </div>
             )}
 
@@ -260,6 +338,107 @@ export default function ProfileModal({
         </div>
       )}
     </Modal>
+  )
+}
+
+/**
+ * One button for the whole friendship lifecycle.
+ *
+ * The label is the next action, not the current state, so there is never a
+ * question of what a click will do: "Add friend" / "Accept" / "Cancel
+ * request" / "Friends" (which unfriends) / "Unblock".
+ */
+function FriendButton({
+  member,
+  relationship,
+  busy,
+  act,
+  refresh,
+}: {
+  member: Member
+  relationship: RelationshipKind
+  busy: boolean
+  act: (label: string, action: () => Promise<unknown>) => Promise<void>
+  refresh: () => Promise<void>
+}) {
+  const run = (label: string, action: () => Promise<unknown>) =>
+    void act(label, async () => {
+      await action()
+      await refresh()
+    })
+
+  if (relationship === 'blocked') {
+    return (
+      <button
+        className="btn btn-subtle"
+        disabled={busy}
+        onClick={() => run('Unblocked.', () => api.unblockUser(member.id))}
+      >
+        <UserX size={14} /> Unblock
+      </button>
+    )
+  }
+
+  if (relationship === 'friend') {
+    return (
+      <button
+        className="btn btn-subtle group"
+        disabled={busy}
+        title="Remove friend"
+        onClick={() => run('Friend removed.', () => api.removeFriend(member.id))}
+      >
+        <Check size={14} className="group-hover:hidden" />
+        <UserMinus size={14} className="hidden group-hover:inline" />
+        <span className="group-hover:hidden">Friends</span>
+        <span className="hidden group-hover:inline">Remove</span>
+      </button>
+    )
+  }
+
+  if (relationship === 'incoming') {
+    return (
+      <div className="flex gap-1.5">
+        <button
+          className="btn btn-primary"
+          disabled={busy}
+          onClick={() => run('Friend added.', () => api.addFriend(member.id))}
+        >
+          <Check size={14} /> Accept
+        </button>
+        <button
+          className="btn btn-ghost !p-2"
+          disabled={busy}
+          title="Decline"
+          aria-label="Decline"
+          onClick={() => run('Request declined.', () => api.removeFriend(member.id))}
+        >
+          <X size={14} />
+        </button>
+      </div>
+    )
+  }
+
+  if (relationship === 'outgoing') {
+    return (
+      <button
+        className="btn btn-subtle"
+        disabled={busy}
+        title="Cancel request"
+        onClick={() => run('Request withdrawn.', () => api.removeFriend(member.id))}
+      >
+        <Clock size={14} /> Pending
+      </button>
+    )
+  }
+
+  return (
+    <button
+      className="btn btn-subtle"
+      disabled={busy}
+      onClick={() => run('Request sent.', () => api.addFriend(member.id))}
+    >
+      <UserPlus size={14} /> Add friend
+    </button>
   )
 }
 

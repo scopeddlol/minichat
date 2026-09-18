@@ -5,7 +5,7 @@ import { toBits } from './perms'
 import { applyBranding, applyMetaBranding } from './theme'
 import type {
   Category, Channel, Emoji, Instance, InstanceMeta, Me, Member, Message,
-  NotificationPreferences, Role, VoiceState,
+  NotificationPreferences, Relationship, Role, VoiceState,
 } from './types'
 
 export type AppPhase = 'loading' | 'setup' | 'anonymous' | 'ready' | 'error'
@@ -45,6 +45,8 @@ interface AppState {
   typing: Record<string, TypingEntry[]>
 
   emojis: Emoji[]
+  /** My friends, requests, blocks and favourites, keyed by the other member. */
+  relationships: Record<string, Relationship>
   notifications: NotificationPreferences
   pushEnabled: boolean
 
@@ -71,6 +73,7 @@ interface AppState {
   jumpToMessage: (channelId: string, messageId: string) => Promise<void>
   clearJump: () => void
   setNotifications: (preferences: NotificationPreferences) => void
+  refreshRelationships: () => Promise<void>
 }
 
 const TYPING_TTL = 7000
@@ -119,6 +122,7 @@ export const useStore = create<AppState>((set, get) => ({
   typing: {},
 
   emojis: [],
+  relationships: {},
   notifications: { mode: 'mentions', channels: [] },
   pushEnabled: false,
 
@@ -387,6 +391,7 @@ export const useStore = create<AppState>((set, get) => ({
           activeChannelId: active,
         })
         if (active && !get().messages[active]) void get().loadMessages(active)
+        void get().refreshRelationships()
         break
       }
 
@@ -533,6 +538,11 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       case 'MEMBER_ADD':
+      case 'RELATIONSHIPS_STALE': {
+        void get().refreshRelationships()
+        break
+      }
+
       case 'MEMBER_UPDATE': {
         const member = d as Member
         const isMe = get().me?.id === member.id
@@ -670,6 +680,24 @@ export const useStore = create<AppState>((set, get) => ({
 
   clearJump() {
     set({ pendingJump: null })
+  },
+
+  /**
+   * Reload the friends list.
+   *
+   * The server only says "this is stale" rather than sending the new list,
+   * because a relationship event goes to both people and the two of them see
+   * different sides of the same pair.
+   */
+  async refreshRelationships() {
+    try {
+      const list = await api.relationships()
+      const map: Record<string, Relationship> = {}
+      for (const entry of list) map[entry.user_id] = entry
+      set({ relationships: map })
+    } catch {
+      /* a failed refresh just leaves the last known list in place */
+    }
   },
 
   setNotifications(preferences) {

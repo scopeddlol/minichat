@@ -2,6 +2,17 @@ export type Presence = 'online' | 'idle' | 'dnd' | 'offline'
 export type ChannelKind = 'text' | 'voice' | 'announcement'
 export type RegistrationMode = 'invite' | 'open' | 'closed'
 
+/**
+ * How a member framed one of their images: the focal point as a percentage
+ * and a zoom factor. Applied at render time, so the upload keeps its
+ * original framing and re-cropping needs no re-upload.
+ */
+export interface ImageFrame {
+  x: number
+  y: number
+  zoom: number
+}
+
 export interface Member {
   id: string
   username: string
@@ -20,6 +31,18 @@ export interface Member {
   last_seen_at: string
   roles: string[]
   message_count?: number
+  avatar_frame: ImageFrame
+  banner_frame: ImageFrame
+}
+
+/** How I relate to another member, from my point of view. */
+export type RelationshipKind = 'friend' | 'outgoing' | 'incoming' | 'blocked' | 'none'
+
+export interface Relationship {
+  user_id: string
+  kind: RelationshipKind
+  /** Private to me; the other member is never told. */
+  favourite: boolean
 }
 
 export interface Me extends Member {

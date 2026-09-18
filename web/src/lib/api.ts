@@ -1,5 +1,6 @@
 import type {
   Attachment, AuditEntry, BanEntry, Category, Channel, DesktopRelease, Emoji, Instance, Invite,
+  Relationship,
   InvitePreview, InstanceMeta, Me, Member, Message, NotificationMode,
   NotificationPreferences, PermissionDef, Role, Stats, VoiceState, Webhook,
 } from './types'
@@ -137,6 +138,17 @@ export const api = {
   overwrites: (id: string) => get<{ role_id: string; allow: string; deny: string }[]>(`/channels/${id}/overwrites`),
   setOverwrite: (id: string, role_id: string, allow: number, deny: number) =>
     put<{ ok: boolean }>(`/channels/${id}/overwrites`, { role_id, allow, deny }),
+
+  // ---- friends and favourites ----
+  relationships: () => get<Relationship[]>('/relationships'),
+  /** Sends a request, or accepts one already pointing at me. */
+  addFriend: (userId: string) => post<{ ok: boolean }>('/relationships', { user_id: userId }),
+  /** Withdraw, decline or unfriend — the server treats them as one thing. */
+  removeFriend: (userId: string) => del<{ ok: boolean }>(`/relationships/${userId}`),
+  blockUser: (userId: string) => post<{ ok: boolean }>('/relationships/block', { user_id: userId }),
+  unblockUser: (userId: string) => del<{ ok: boolean }>(`/relationships/block/${userId}`),
+  favourite: (userId: string) => put<{ ok: boolean }>(`/favourites/${userId}`),
+  unfavourite: (userId: string) => del<{ ok: boolean }>(`/favourites/${userId}`),
 
   categories: () => get<Category[]>('/categories'),
   createCategory: (payload: {

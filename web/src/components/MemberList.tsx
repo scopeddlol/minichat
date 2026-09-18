@@ -8,6 +8,7 @@ import { Avatar, RoleFlair } from './ui'
 export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: string) => void }) {
   const members = useStore((s) => s.members)
   const roles = useStore((s) => s.roles)
+  const relationships = useStore((s) => s.relationships)
   const [query, setQuery] = useState('')
 
   const groups = useMemo(() => {
@@ -19,6 +20,12 @@ export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: 
         member.username.toLowerCase().includes(needle),
     )
 
+    // Favourites and friends rise to the top, ahead of hoisted roles: a
+    // hoisted role says something about the instance, these say something
+    // about you, and that is the more useful sort for finding someone.
+    const starred: Member[] = []
+    const friends: Member[] = []
+
     const hoisted = roles.filter((role) => role.hoist).sort((a, b) => b.position - a.position)
     const buckets: { role: Role | null; label: string; members: Member[] }[] = hoisted.map((role) => ({
       role,
@@ -29,6 +36,15 @@ export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: 
     const offline: Member[] = []
 
     for (const member of list) {
+      const relation = relationships[member.id]
+      if (relation?.favourite) {
+        starred.push(member)
+        continue
+      }
+      if (relation?.kind === 'friend') {
+        friends.push(member)
+        continue
+      }
       if (member.presence === 'offline') {
         offline.push(member)
         continue
@@ -39,14 +55,20 @@ export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: 
     }
 
     const sort = (a: Member, b: Member) => a.display_name.localeCompare(b.display_name)
-    const result = buckets
-      .filter((bucket) => bucket.members.length)
-      .map((bucket) => ({ ...bucket, members: bucket.members.sort(sort) }))
+    const result: { role: Role | null; label: string; members: Member[] }[] = []
+
+    if (starred.length) result.push({ role: null, label: 'Favourites', members: starred.sort(sort) })
+    if (friends.length) result.push({ role: null, label: 'Friends', members: friends.sort(sort) })
+    result.push(
+      ...buckets
+        .filter((bucket) => bucket.members.length)
+        .map((bucket) => ({ ...bucket, members: bucket.members.sort(sort) })),
+    )
 
     if (online.length) result.push({ role: null, label: 'Online', members: online.sort(sort) })
     if (offline.length) result.push({ role: null, label: 'Offline', members: offline.sort(sort) })
     return result
-  }, [members, roles, query])
+  }, [members, roles, relationships, query])
 
   const onlineCount = Object.values(members).filter((m) => m.presence !== 'offline').length
 
@@ -97,6 +119,7 @@ export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: 
                       id={member.id}
                       name={member.display_name}
                       src={member.avatar_url}
+                      frame={member.avatar_frame}
                       accent={member.accent_color}
                       size="sm"
                       presence={member.presence}

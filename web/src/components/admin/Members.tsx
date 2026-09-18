@@ -126,6 +126,7 @@ export default function Members({ onOpenProfile }: { onOpenProfile: (userId: str
                     id={member.id}
                     name={member.display_name}
                     src={member.avatar_url}
+                    frame={member.avatar_frame}
                     accent={member.accent_color}
                     size="md"
                     presence={member.presence}

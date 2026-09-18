@@ -1,17 +1,38 @@
 import { X } from 'lucide-react'
 import {
   createContext, useCallback, useContext, useEffect, useId, useRef, useState,
-  type ReactNode,
+  type CSSProperties, type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { create } from 'zustand'
 import { avatarGradient, initials } from '../lib/format'
+import type { ImageFrame } from '../lib/types'
 
 /* -------------------------------------------------------------------------- */
 /* Avatar                                                                      */
 /* -------------------------------------------------------------------------- */
 
 const SIZES = { xs: 20, sm: 28, md: 36, lg: 44, xl: 80, xxl: 112 } as const
+
+/**
+ * A stored frame as CSS.
+ *
+ * `object-position` moves the focal point and `scale` zooms, which together
+ * reproduce a drag-and-pinch crop without touching the uploaded file. An
+ * absent or default frame produces no style at all, so the overwhelmingly
+ * common case stays a plain `object-cover` image.
+ */
+export function frameStyle(frame?: ImageFrame | null): CSSProperties | undefined {
+  if (!frame) return undefined
+  const centred = frame.x === 50 && frame.y === 50
+  if (centred && frame.zoom === 1) return undefined
+  return {
+    objectPosition: `${frame.x}% ${frame.y}%`,
+    transform: frame.zoom === 1 ? undefined : `scale(${frame.zoom})`,
+    // Scaling from the focal point, so zooming in keeps the chosen spot put.
+    transformOrigin: `${frame.x}% ${frame.y}%`,
+  }
+}
 
 export function Avatar({
   name,
@@ -21,6 +42,7 @@ export function Avatar({
   size = 'md',
   presence,
   ring,
+  frame,
   className = '',
 }: {
   name: string
@@ -30,6 +52,8 @@ export function Avatar({
   size?: keyof typeof SIZES
   presence?: 'online' | 'idle' | 'dnd' | 'offline'
   ring?: boolean
+  /** How the owner positioned the image; centred and unzoomed when absent. */
+  frame?: ImageFrame | null
   className?: string
 }) {
   const [broken, setBroken] = useState(false)
@@ -52,6 +76,7 @@ export function Avatar({
             alt=""
             loading="lazy"
             className="w-full h-full object-cover"
+            style={frameStyle(frame)}
             onError={() => setBroken(true)}
           />
         ) : (

@@ -463,6 +463,7 @@ function ChannelGroup({
                         id={member.id}
                         name={member.display_name}
                         src={member.avatar_url}
+                        frame={member.avatar_frame}
                         accent={member.accent_color}
                         size="xs"
                       />
@@ -681,6 +682,7 @@ function UserDock({
           id={me.id}
           name={me.display_name}
           src={me.avatar_url}
+          frame={me.avatar_frame}
           accent={me.accent_color}
           size="md"
           presence={connection === 'ready' ? me.presence : 'offline'}
