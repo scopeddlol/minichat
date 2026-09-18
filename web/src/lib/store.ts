@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useInbox } from './direct'
 import { api, ApiError, getToken, setToken } from './api'
 import { gateway, type GatewayEvent, type GatewayStatus } from './gateway'
 import { toBits } from './perms'
@@ -192,6 +193,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setActiveChannel(channelId) {
+    useInbox.setState({ open: false })
     set({ activeChannelId: channelId })
     if (!channelId) return
     try {
@@ -314,6 +316,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   markRead(channelId) {
+    if (useInbox.getState().open) return
     const list = get().messages[channelId] ?? []
     const last = list[list.length - 1]
     set((s) => ({
@@ -417,7 +420,7 @@ export const useStore = create<AppState>((set, get) => ({
 
       case 'MENTION_ADD': {
         const { channel_id } = d as { channel_id: string }
-        if (get().activeChannelId === channel_id && document.visibilityState === 'visible') break
+        if (!useInbox.getState().open && get().activeChannelId === channel_id && document.visibilityState === 'visible') break
         set((s) => ({
           mentionCounts: {
             ...s.mentionCounts,
@@ -445,7 +448,7 @@ export const useStore = create<AppState>((set, get) => ({
 
       case 'MESSAGE_CREATE': {
         const message = d as Message
-        const isActive = get().activeChannelId === message.channel_id
+        const isActive = !useInbox.getState().open && get().activeChannelId === message.channel_id
         const isMine = message.author?.id === get().me?.id
         set((s) => {
           const existing = s.messages[message.channel_id]
@@ -674,6 +677,7 @@ export const useStore = create<AppState>((set, get) => ({
    * centred on it when needed, then hands the ID to the message list.
    */
   async jumpToMessage(channelId, messageId) {
+    useInbox.setState({ open: false })
     const loaded = get().messages[channelId] ?? []
     if (get().activeChannelId !== channelId) set({ activeChannelId: channelId })
 

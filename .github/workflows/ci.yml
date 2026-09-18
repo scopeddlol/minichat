@@ -72,6 +72,9 @@ jobs:
       - name: Type check
         working-directory: web
         run: npm run typecheck
+      - name: Regression tests
+        working-directory: web
+        run: npm test
       - name: Build
         working-directory: web
         run: npm run build

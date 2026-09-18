@@ -1,3 +1,4 @@
+import CameraPicker from '../components/CameraPicker'
 import {
   Hash, Menu, Pin, Search, Users, WifiOff, X, Download,
 } from 'lucide-react'
@@ -391,6 +392,7 @@ export default function Chat() {
       {/* Overlays */}
       <MemberActions onProfile={openProfile} />
       <DirectCallOverlay onShare={() => setScreenShareOpen(true)} />
+      <CameraPicker />
       <ScreenShareDialog open={screenShareOpen} onClose={() => setScreenShareOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} onOpenProfile={openProfile} />

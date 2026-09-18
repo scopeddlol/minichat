@@ -1,5 +1,6 @@
+import VoiceDeviceControl from './VoiceDeviceControl'
 import { useEffect, useState } from 'react'
-import { Mic, MicOff, Phone, PhoneOff, Video, ScreenShare } from 'lucide-react'
+import { Phone, PhoneOff, Video, ScreenShare } from 'lucide-react'
 import { direct, useInbox, type DirectCall } from '../lib/direct'
 import { gateway } from '../lib/gateway'
 import { useStore } from '../lib/store'
@@ -104,13 +105,8 @@ export default function DirectCallOverlay({ onShare }: { onShare: () => void }) 
       <div className="flex flex-wrap justify-center gap-2 p-4">
         {connected ? (
           <>
-            <button
-              className="btn btn-subtle"
-              aria-label={voice.muted ? 'Unmute' : 'Mute'}
-              onClick={() => void voice.toggleMute()}
-            >
-              {voice.muted ? <MicOff size={18} /> : <Mic size={18} />}
-            </button>
+            <div className="w-16"><VoiceDeviceControl kind="audioinput" /></div>
+            <div className="w-16"><VoiceDeviceControl kind="audiooutput" /></div>
             <button
               className="btn btn-subtle"
               aria-label="Toggle camera"

@@ -99,7 +99,24 @@ def run(binary):
                 assert channel in [c["id"] for c in api("GET", "/channels", token=a)]
                 api("DELETE", f"/admin/members/{aid}/roles/{role}", token=operator)
                 assert channel not in [c["id"] for c in api("GET", "/channels", token=a)]
-                print("PASS: authenticated DM privacy, unread state, call consent, blocking, and category inheritance")
+                public = api("POST", "/categories", {"name": "Public category"}, operator)["id"]
+                order = {"channels": [{"id": channel, "position": 0, "category_id": public}]}
+                api("POST", "/channels/reorder", order, a, status=403)
+                api("POST", "/channels/reorder", order, operator)
+                assert channel in [c["id"] for c in api("GET", "/channels", token=a)]
+                order["channels"][0]["category_id"] = category
+                api("POST", "/channels/reorder", order, operator)
+                assert channel not in [c["id"] for c in api("GET", "/channels", token=a)]
+                # A later invalid entry rolls back the earlier move too.
+                api("POST", "/channels/reorder", {"channels": [
+                    {"id": channel, "position": 0, "category_id": public},
+                    {"id": "missing-channel", "position": 1, "category_id": public},
+                ]}, operator, status=404)
+                assert channel not in [c["id"] for c in api("GET", "/channels", token=a)]
+                api("POST", "/channels/reorder", {"channels": [
+                    {"id": channel, "position": 0, "category_id": "missing-category"},
+                ]}, operator, status=400)
+                print("PASS: authenticated DM privacy, unread state, call consent, blocking, category inheritance, and atomic channel reordering")
             except Exception:
                 log.flush()
                 log.seek(0)

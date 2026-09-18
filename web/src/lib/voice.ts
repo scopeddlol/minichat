@@ -13,10 +13,15 @@ import { api } from './api'
 import { gateway } from './gateway'
 import { direct } from './direct'
 import {
-  captureOptions, loadScreenShareSettings, publishOptions, saveScreenShareSettings,
+  captureOptions,
+  loadScreenShareSettings,
+  publishOptions,
+  saveScreenShareSettings,
   type ScreenShareSettings,
 } from './screenshare'
 import { useStore } from './store'
+import { playVoiceSound, unlockVoiceSounds } from './voiceSounds'
+import { cancelNativePicker, hasNativeCapture, nativeScreenTrack } from './nativeCapture'
 
 export interface VoiceParticipant {
   identity: string
@@ -70,7 +75,9 @@ interface VoiceStore {
   muted: boolean
   deafened: boolean
   cameraOn: boolean
+  cameraPickerOpen: boolean
   screenSharing: boolean
+  screenShareStarting: boolean
 
   canSpeak: boolean
   canVideo: boolean
@@ -96,6 +103,7 @@ interface VoiceStore {
   toggleMute: () => Promise<void>
   toggleDeafen: () => Promise<void>
   toggleCamera: () => Promise<void>
+  startCamera: (deviceId: string) => Promise<void>
   toggleScreenShare: () => Promise<void>
   setFocus: (identity: string | null) => void
   refreshDevices: () => Promise<void>
@@ -110,6 +118,10 @@ interface VoiceStore {
 const trackKey = (identity: string, source: Track.Source) => `${identity}:${source}`
 let joinAttempt = 0
 let pendingRoom: Room | null = null
+let stopNativeShare: (() => void) | undefined
+let shareAttempt = 0
+let mutedBeforeDeafen = false
+const deviceAttempts = { audioinput: 0, audiooutput: 0, videoinput: 0 }
 
 export const useVoice = create<VoiceStore>((set, get) => ({
   room: null,
@@ -121,7 +133,9 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   muted: false,
   deafened: false,
   cameraOn: false,
+  cameraPickerOpen: false,
   screenSharing: false,
+  screenShareStarting: false,
 
   canSpeak: true,
   canVideo: true,
@@ -142,6 +156,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   screenShare: loadScreenShareSettings(),
 
   async join(channelId) {
+    unlockVoiceSounds()
     if (get().connecting) return
     if (get().channelId === channelId && get().connected) return
     if (get().room) await get().leave()
@@ -171,7 +186,10 @@ export const useVoice = create<VoiceStore>((set, get) => ({
       pendingRoom = room
       wireEvents(room, set, get)
       await room.connect(grant.url, grant.token)
-      if (attempt !== joinAttempt) { await room.disconnect(); return }
+      if (attempt !== joinAttempt) {
+        await room.disconnect()
+        return
+      }
       pendingRoom = null
 
       set({
@@ -189,14 +207,10 @@ export const useVoice = create<VoiceStore>((set, get) => ({
       // Honour a saved microphone choice rather than always taking the default.
       const chosen = get().selectedDevices
       if (chosen.audioinput && chosen.audioinput !== 'default') {
-        await room
-          .switchActiveDevice('audioinput', chosen.audioinput)
-          .catch(() => undefined)
+        await room.switchActiveDevice('audioinput', chosen.audioinput).catch(() => undefined)
       }
       if (chosen.audiooutput && chosen.audiooutput !== 'default') {
-        await room
-          .switchActiveDevice('audiooutput', chosen.audiooutput)
-          .catch(() => undefined)
+        await room.switchActiveDevice('audiooutput', chosen.audiooutput).catch(() => undefined)
       }
 
       // Push-to-talk starts closed: the mic opens only while the key is held.
@@ -209,13 +223,18 @@ export const useVoice = create<VoiceStore>((set, get) => ({
           if (startMuted) set({ muted: true })
         } catch {
           // No microphone, or permission denied: stay connected as a listener.
-          set({ muted: true, error: 'Microphone unavailable — you joined as a listener.' })
+          set({
+            muted: true,
+            error: 'Microphone unavailable — you joined as a listener.',
+          })
         }
       }
 
       void get().refreshDevices()
 
       syncParticipants(room, set)
+      if (attempt !== joinAttempt) return
+      playVoiceSound('join', get().selectedDevices.audiooutput)
       publishVoiceState(channelId, get())
     } catch (error) {
       if (attempt !== joinAttempt) return
@@ -232,11 +251,16 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   },
 
   async leave() {
+    cancelNativePicker()
+    ++shareAttempt
+    stopNativeShare?.()
+    stopNativeShare = undefined
     ++joinAttempt
     const pending = pendingRoom
     pendingRoom = null
     const room = get().room
     const leavingChannel = get().channelId
+    if (get().connected) playVoiceSound('leave', get().selectedDevices.audiooutput)
     set({
       room: null,
       channelId: null,
@@ -245,7 +269,9 @@ export const useVoice = create<VoiceStore>((set, get) => ({
       participants: [],
       tracks: {},
       cameraOn: false,
+      cameraPickerOpen: false,
       screenSharing: false,
+      screenShareStarting: false,
       deafened: false,
       focusedIdentity: null,
     })
@@ -258,16 +284,22 @@ export const useVoice = create<VoiceStore>((set, get) => ({
     }
     if (pending && pending !== room) await pending.disconnect().catch(() => undefined)
     gateway.send({ op: 'voice_state', channel_id: null })
-    if (leavingChannel?.startsWith('direct:')) await direct.action(leavingChannel.slice(7), 'end').catch(() => undefined)
+    if (leavingChannel?.startsWith('direct:'))
+      await direct.action(leavingChannel.slice(7), 'end').catch(() => undefined)
   },
 
   async toggleMute() {
+    if (get().deafened) {
+      await get().toggleDeafen()
+      if (!get().muted) return
+    }
     const { room, muted, canSpeak, channelId } = get()
     if (!room || !canSpeak) return
     const next = !muted
     try {
       await room.localParticipant.setMicrophoneEnabled(!next)
       set({ muted: next })
+      playVoiceSound(next ? 'mute' : 'unmute', get().selectedDevices.audiooutput)
       if (channelId) publishVoiceState(channelId, { ...get(), muted: next })
     } catch {
       set({ error: 'Could not change your microphone.' })
@@ -275,16 +307,17 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   },
 
   async toggleDeafen() {
-    const { room, deafened, muted, channelId } = get()
+    const { room, deafened, muted, channelId, canSpeak } = get()
     if (!room) return
     const next = !deafened
+    if (next) mutedBeforeDeafen = muted
     // Deafening implies muting, the same way it does in Discord. Undeafening
     // restores each member's own volume rather than resetting everyone to 1.
     const volumes = get().volumes
     room.remoteParticipants.forEach((participant) =>
       participant.setVolume(next ? 0 : (volumes[participant.identity] ?? 1)),
     )
-    const nextMuted = next ? true : muted
+    const nextMuted = next || !canSpeak ? true : mutedBeforeDeafen
     if (next !== deafened) {
       try {
         await room.localParticipant.setMicrophoneEnabled(!nextMuted)
@@ -293,12 +326,22 @@ export const useVoice = create<VoiceStore>((set, get) => ({
       }
     }
     set({ deafened: next, muted: nextMuted })
-    if (channelId) publishVoiceState(channelId, { ...get(), deafened: next, muted: nextMuted })
+    playVoiceSound(next ? 'deafen' : 'undeafen', get().selectedDevices.audiooutput)
+    if (channelId)
+      publishVoiceState(channelId, {
+        ...get(),
+        deafened: next,
+        muted: nextMuted,
+      })
   },
 
   async toggleCamera() {
     const { room, cameraOn, canVideo, channelId } = get()
     if (!room || !canVideo) return
+    if (!cameraOn) {
+      set({ cameraPickerOpen: true })
+      return
+    }
     const next = !cameraOn
     try {
       await room.localParticipant.setCameraEnabled(next)
@@ -307,6 +350,22 @@ export const useVoice = create<VoiceStore>((set, get) => ({
     } catch {
       set({ error: 'Could not access your camera.' })
     }
+  },
+
+  async startCamera(deviceId) {
+    const { room, canVideo, channelId } = get()
+    if (!room || !canVideo) throw new Error('Join a call before starting your camera.')
+    await room.localParticipant.setCameraEnabled(true, {
+      deviceId: { exact: deviceId },
+    })
+    if (get().room !== room) {
+      await room.localParticipant.setCameraEnabled(false)
+      return
+    }
+    const selectedDevices = { ...get().selectedDevices, videoinput: deviceId }
+    set({ cameraOn: true, cameraPickerOpen: false, selectedDevices })
+    saveJson(DEVICE_STORAGE_KEY, selectedDevices)
+    if (channelId) publishVoiceState(channelId, get())
   },
 
   async toggleScreenShare() {
@@ -323,34 +382,84 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   /**
    * Begin sharing at the chosen quality.
    *
-   * The browser's source picker appears after this call — it is the gate that
-   * makes screen capture safe, and a page cannot replace it.
+   * Updated Windows clients ask their bundled picker for consent; other
+   * clients use the browser's own getDisplayMedia source picker.
    */
   async startScreenShare() {
     const { room, canScreenShare, channelId, screenShare } = get()
-    if (!room || !canScreenShare) return
+    if (!room || !canScreenShare || get().screenShareStarting || get().screenSharing) return
+    set({ screenShareStarting: true })
+    const attempt = ++shareAttempt
     try {
-      await room.localParticipant.setScreenShareEnabled(
-        true,
-        captureOptions(screenShare),
-        publishOptions(screenShare),
-      )
+      if (hasNativeCapture()) {
+        const capture = await nativeScreenTrack(screenShare)
+        if (get().room !== room || attempt !== shareAttempt) {
+          capture.stop()
+          return
+        }
+        stopNativeShare = capture.stop
+        capture.track.addEventListener(
+          'ended',
+          () => {
+            if (attempt === shareAttempt) void get().stopScreenShare()
+          },
+          { once: true },
+        )
+        await room.localParticipant.publishTrack(capture.track, {
+          ...publishOptions(screenShare),
+          source: Track.Source.ScreenShare,
+          name: 'Screen share',
+        })
+        if (capture.audio)
+          await room.localParticipant.publishTrack(capture.audio, {
+            source: Track.Source.ScreenShareAudio,
+            name: 'Shared audio',
+          })
+        if (get().room !== room || attempt !== shareAttempt) {
+          capture.stop()
+          await room.localParticipant.unpublishTrack(capture.track)
+          if (capture.audio) await room.localParticipant.unpublishTrack(capture.audio)
+          return
+        }
+      } else
+        await room.localParticipant.setScreenShareEnabled(
+          true,
+          captureOptions(screenShare),
+          publishOptions(screenShare),
+        )
+      if (get().room !== room || attempt !== shareAttempt) {
+        await room.localParticipant.setScreenShareEnabled(false)
+        return
+      }
       set({ screenSharing: true })
       if (channelId) publishVoiceState(channelId, { ...get(), screenSharing: true })
     } catch (error) {
+      if (attempt !== shareAttempt) return
+      stopNativeShare?.()
+      stopNativeShare = undefined
+      await room.localParticipant.setScreenShareEnabled(false).catch(() => undefined)
       // Dismissing the picker throws NotAllowedError; that's a choice, not a
       // fault, so it shouldn't raise an error banner.
       const name = (error as { name?: string })?.name
       set({
         screenSharing: false,
-        error: name === 'NotAllowedError' ? '' : 'Could not start sharing your screen.',
+        error:
+          name === 'NotAllowedError' || String(error).includes('cancelled')
+            ? ''
+            : 'Could not start sharing your screen.',
       })
+    } finally {
+      if (attempt === shareAttempt) set({ screenShareStarting: false })
     }
   },
 
   async stopScreenShare() {
+    cancelNativePicker()
+    ++shareAttempt
+    stopNativeShare?.()
+    stopNativeShare = undefined
     const { room, channelId } = get()
-    set({ screenSharing: false })
+    set({ screenSharing: false, screenShareStarting: false })
     if (!room) return
     try {
       await room.localParticipant.setScreenShareEnabled(false)
@@ -377,7 +486,9 @@ export const useVoice = create<VoiceStore>((set, get) => ({
           .filter((device) => device.kind === kind && device.deviceId)
           .map((device, index) => ({
             deviceId: device.deviceId,
-            label: device.label || `${kind.replace('input', ' input').replace('output', ' output')} ${index + 1}`,
+            label:
+              device.label ||
+              `${kind.replace('input', ' input').replace('output', ' output')} ${index + 1}`,
           }))
 
       set({
@@ -393,16 +504,18 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   },
 
   async selectDevice(kind, deviceId) {
-    const selected = { ...get().selectedDevices, [kind]: deviceId }
-    set({ selectedDevices: selected })
-    saveJson(DEVICE_STORAGE_KEY, selected)
-
+    const attempt = ++deviceAttempts[kind]
     const room = get().room
-    if (!room) return
     try {
-      await room.switchActiveDevice(kind, deviceId)
+      if (room && !(await room.switchActiveDevice(kind, deviceId)))
+        throw new Error('Device switch failed')
+      if (attempt !== deviceAttempts[kind]) return
+      const selected = { ...get().selectedDevices, [kind]: deviceId }
+      set({ selectedDevices: selected, error: '' })
+      saveJson(DEVICE_STORAGE_KEY, selected)
     } catch {
       set({ error: 'Could not switch to that device.' })
+      throw new Error('Could not switch to that device.')
     }
   },
 
@@ -433,12 +546,21 @@ export const useVoice = create<VoiceStore>((set, get) => ({
 }))
 
 /** Read hotkey preferences without importing the store and creating a cycle. */
-function loadHotkeyPreferences(): { enabled: boolean; pttMode: 'hold' | 'toggle' } {
+function loadHotkeyPreferences(): {
+  enabled: boolean
+  pttMode: 'hold' | 'toggle'
+} {
   try {
     const raw = localStorage.getItem('minichat.hotkeys')
     if (!raw) return { enabled: false, pttMode: 'hold' }
-    const parsed = JSON.parse(raw) as { enabled?: boolean; pttMode?: 'hold' | 'toggle' }
-    return { enabled: Boolean(parsed.enabled), pttMode: parsed.pttMode ?? 'hold' }
+    const parsed = JSON.parse(raw) as {
+      enabled?: boolean
+      pttMode?: 'hold' | 'toggle'
+    }
+    return {
+      enabled: Boolean(parsed.enabled),
+      pttMode: parsed.pttMode ?? 'hold',
+    }
   } catch {
     return { enabled: false, pttMode: 'hold' }
   }
@@ -450,8 +572,16 @@ function wireEvents(room: Room, set: Setter, get: () => VoiceStore) {
   const resync = () => syncParticipants(room, set)
 
   room
-    .on(RoomEvent.ParticipantConnected, resync)
-    .on(RoomEvent.ParticipantDisconnected, resync)
+    .on(RoomEvent.ParticipantConnected, () => {
+      if (get().room === room && !get().deafened)
+        playVoiceSound('join', get().selectedDevices.audiooutput)
+      resync()
+    })
+    .on(RoomEvent.ParticipantDisconnected, () => {
+      if (get().room === room && !get().deafened)
+        playVoiceSound('leave', get().selectedDevices.audiooutput)
+      resync()
+    })
     .on(RoomEvent.ActiveSpeakersChanged, resync)
     .on(RoomEvent.TrackMuted, resync)
     .on(RoomEvent.TrackUnmuted, resync)
@@ -485,14 +615,21 @@ function wireEvents(room: Room, set: Setter, get: () => VoiceStore) {
           participant.setVolume(get().deafened ? 0 : (stored ?? 1))
         }
         set({
-          tracks: { ...get().tracks, [trackKey(participant.identity, publication.source)]: track },
+          tracks: {
+            ...get().tracks,
+            [trackKey(participant.identity, publication.source)]: track,
+          },
         })
         resync()
       },
     )
     .on(
       RoomEvent.TrackUnsubscribed,
-      (_track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+      (
+        _track: RemoteTrack,
+        publication: RemoteTrackPublication,
+        participant: RemoteParticipant,
+      ) => {
         const tracks = { ...get().tracks }
         delete tracks[trackKey(participant.identity, publication.source)]
         set({ tracks })
@@ -501,10 +638,26 @@ function wireEvents(room: Room, set: Setter, get: () => VoiceStore) {
     )
     .on(RoomEvent.Disconnected, () => {
       if (get().room !== room) return
+      ++shareAttempt
+      cancelNativePicker()
+      stopNativeShare?.()
+      stopNativeShare = undefined
+      playVoiceSound('leave', get().selectedDevices.audiooutput)
       const disconnectedChannel = get().channelId
-      set({ connected: false, room: null, channelId: null, participants: [], tracks: {} })
+      set({
+        connected: false,
+        room: null,
+        channelId: null,
+        participants: [],
+        tracks: {},
+        cameraOn: false,
+        cameraPickerOpen: false,
+        screenSharing: false,
+        screenShareStarting: false,
+      })
       gateway.send({ op: 'voice_state', channel_id: null })
-      if (disconnectedChannel?.startsWith('direct:')) void direct.action(disconnectedChannel.slice(7), 'end').catch(() => undefined)
+      if (disconnectedChannel?.startsWith('direct:'))
+        void direct.action(disconnectedChannel.slice(7), 'end').catch(() => undefined)
     })
     .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
       if (get().room !== room) return
@@ -513,7 +666,10 @@ function wireEvents(room: Room, set: Setter, get: () => VoiceStore) {
 }
 
 function syncParticipants(room: Room, set: Setter) {
-  const build = (participant: RemoteParticipant | typeof room.localParticipant, isLocal: boolean): VoiceParticipant => ({
+  const build = (
+    participant: RemoteParticipant | typeof room.localParticipant,
+    isLocal: boolean,
+  ): VoiceParticipant => ({
     identity: participant.identity,
     name: participant.name || participant.identity,
     speaking: participant.isSpeaking,
@@ -547,7 +703,12 @@ function publishVoiceState(channelId: string, state: Partial<VoiceStore>) {
 gateway.on((event) => {
   if (event.t === 'ACCESS_UPDATE') {
     const channel = useVoice.getState().channelId
-    if (channel && !channel.startsWith('direct:') && !event.d.channels.some((c: { id: string }) => c.id === channel)) void useVoice.getState().leave()
+    if (
+      channel &&
+      !channel.startsWith('direct:') &&
+      !event.d.channels.some((c: { id: string }) => c.id === channel)
+    )
+      void useVoice.getState().leave()
   }
   if (event.t === 'VOICE_FORCE_DISCONNECT') void useVoice.getState().leave()
   if (event.t === 'CHANNEL_DELETE' && useVoice.getState().channelId === event.d.id) {

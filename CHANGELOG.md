@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Windows desktop screen sharing uses a bundled MiniChat screen/window picker with previews and an always-visible stop control. Capture requires an explicit selection in that local window. Optional audio shares the selected application, or other applications when sharing a display, excluding MiniChat's call audio.
+- Camera sharing opens a custom preview and device selector before publishing. Microphone and speaker menus are available beside mute/deafen in channels and private calls.
+- Voice join/leave cues play for participants already in the call as well as the person connecting/disconnecting. Mute, unmute, deafen, and undeafen have local cues routed to the selected output.
+- Opening DMs clears the channel highlight and preserves unread messages and mentions in the previous channel.
+- Members with Manage Channels permission can drag channels to reorder them or move them into another category. Synced permissions move atomically with the channel; invalid moves leave the previous order intact.
+
+The native picker requires the updated Windows desktop client. Browsers retain their own screen-capture consent UI. Native application audio requires Windows process-loopback support; the picker reports an unavailable audio device and allows sharing without audio. Closing or minimizing a shared window ends its capture. Capture frame rates depend on source size and system performance.
+
 ## 0.4.0
 
 - A calmer, flatter interface with neutral dark and light surfaces, roomier channel and member navigation, more comfortable message spacing, and reduced-motion support.

@@ -1,0 +1,6 @@
+{
+  "identifier": "share-picker",
+  "description": "Bundled native source picker window controls. Source commands additionally verify the calling window and bundled URL.",
+  "windows": ["share-picker"],
+  "permissions": ["core:window:allow-start-dragging", "core:window:allow-close"]
+}
