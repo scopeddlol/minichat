@@ -1,5 +1,6 @@
 import {
-  AlertCircle, CornerUpLeft, Download, Pencil, Pin, PinOff, RotateCw, SmilePlus, Trash2, Webhook,
+  AlertCircle, ClipboardCopy, CornerUpLeft, CornerUpRight, Download, Link2, Pencil, Pin, PinOff,
+  RotateCw, SmilePlus, Trash2, Webhook,
 } from 'lucide-react'
 import { memo, useState } from 'react'
 import { api } from '../lib/api'
@@ -10,7 +11,8 @@ import { isJumboEmoji, renderMarkdown } from '../lib/markdown'
 import { can, P } from '../lib/perms'
 import { useStore } from '../lib/store'
 import type { Attachment, Message } from '../lib/types'
-import { Avatar, Badge, RoleFlair, toast, useConfirm } from './ui'
+import { useContextMenu, useLongPress, type MenuItem } from './ContextMenu'
+import { Avatar, Badge, copyText, RoleFlair, toast, useConfirm } from './ui'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '🔥']
 
@@ -19,6 +21,7 @@ interface Props {
   grouped: boolean
   channelPermissions: bigint
   onReply: (message: Message) => void
+  onForward: (message: Message) => void
   onOpenProfile: (userId: string) => void
   onOpenImage: (attachment: Attachment) => void
   highlight?: boolean
@@ -29,6 +32,7 @@ function MessageItemInner({
   grouped,
   channelPermissions,
   onReply,
+  onForward,
   onOpenProfile,
   onOpenImage,
   highlight,
@@ -41,6 +45,7 @@ function MessageItemInner({
   const retryMessage = useStore((s) => s.retryMessage)
   const jumpToMessage = useStore((s) => s.jumpToMessage)
   const confirm = useConfirm()
+  const menu = useContextMenu()
 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
@@ -94,6 +99,72 @@ function MessageItemInner({
     }
   }
 
+  /** Right-click (or long-press) on a message. */
+  const buildMenu = (): MenuItem[] => {
+    const link = `${location.origin}/?channel=${message.channel_id}&message=${message.id}`
+    const items: MenuItem[] = [
+      { label: 'Reply', icon: <CornerUpLeft size={14} />, onSelect: () => onReply(message) },
+      { label: 'Forward', icon: <CornerUpRight size={14} />, onSelect: () => onForward(message) },
+    ]
+    if (canReact) {
+      items.push({
+        label: 'Add reaction',
+        icon: <SmilePlus size={14} />,
+        onSelect: () => setPickerOpen(true),
+      })
+    }
+    items.push(
+      { separator: true },
+      {
+        label: 'Copy text',
+        icon: <ClipboardCopy size={14} />,
+        // Nothing to copy from an attachment-only message.
+        disabled: !message.content,
+        onSelect: () => void copyText(message.content, 'Message copied'),
+      },
+      {
+        label: 'Copy link',
+        icon: <Link2 size={14} />,
+        onSelect: () => void copyText(link, 'Message link copied'),
+      },
+    )
+    if (isMine && !message.webhook_name) {
+      items.push({
+        label: 'Edit',
+        icon: <Pencil size={14} />,
+        onSelect: () => {
+          setDraft(message.content)
+          setEditing(true)
+        },
+      })
+    }
+    if (canPin) {
+      items.push({
+        label: message.pinned ? 'Unpin' : 'Pin',
+        icon: message.pinned ? <PinOff size={14} /> : <Pin size={14} />,
+        onSelect: async () => {
+          try {
+            if (message.pinned) await api.unpinMessage(message.id)
+            else await api.pinMessage(message.id)
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Could not pin.')
+          }
+        },
+      })
+    }
+    if (canDelete) {
+      items.push(
+        { separator: true },
+        { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onSelect: () => void remove() },
+      )
+    }
+    return items
+  }
+
+  const longPress = useLongPress((point) =>
+    menu.open({ ...point, preventDefault: () => undefined }, buildMenu()),
+  )
+
   const remove = async () => {
     const ok = await confirm({
       title: 'Delete this message?',
@@ -136,6 +207,14 @@ function MessageItemInner({
         opacity: message.pending ? 0.6 : 1,
       }}
       onMouseLeave={() => setPickerOpen(false)}
+      onContextMenu={(event) => {
+        // A right-click on a link or an image should stay the browser's, so
+        // "open in new tab" and "save image" still work.
+        const target = event.target as HTMLElement
+        if (target.closest('a, img, input, textarea')) return
+        menu.open(event, buildMenu())
+      }}
+      {...longPress}
     >
       <div className="hidden group-hover:block absolute inset-0 pointer-events-none" style={{ background: 'var(--surface-1)', opacity: 0.55 }} />
 

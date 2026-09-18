@@ -13,6 +13,7 @@ import Sidebar, { ChannelIcon } from '../components/Sidebar'
 import VoiceStage from '../components/VoiceStage'
 import CategoryDialog from '../components/CategoryDialog'
 import ChannelDialog from '../components/ChannelDialog'
+import ForwardDialog from '../components/ForwardDialog'
 import { CreateInviteModal } from '../components/admin/Invites'
 import { Modal, Spinner, EmptyState } from '../components/ui'
 import { api } from '../lib/api'
@@ -54,6 +55,7 @@ export default function Chat() {
   const [lightbox, setLightbox] = useState<Attachment | null>(null)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [screenShareOpen, setScreenShareOpen] = useState(false)
+  const [forwarding, setForwarding] = useState<Message | null>(null)
 
   const channel = channels.find((c) => c.id === activeChannelId) ?? null
   const perms = channel ? (channelPermissions[channel.id] ?? permissions) : permissions
@@ -103,15 +105,39 @@ export default function Chat() {
     return () => navigator.serviceWorker?.removeEventListener('message', onMessage)
   }, [])
 
-  // A notification that opened a fresh window carries the channel in the URL.
+  /**
+   * A deep link: a notification that opened a fresh window carries the
+   * channel, and a copied message link carries the message too.
+   *
+   * Read on the first render and cleared from the URL immediately, but acted
+   * on only once the channel list exists. `phase` becomes 'ready' from the
+   * HTTP boot, while channels arrive later with the gateway's READY frame —
+   * so Chat mounts with none, and doing this in a mount effect silently did
+   * nothing at all.
+   */
+  const [deepLink] = useState(() => {
+    const params = new URLSearchParams(location.search)
+    const channel = params.get('channel')
+    const message = params.get('message')
+    if (channel) window.history.replaceState({}, '', '/')
+    return channel ? { channel, message } : null
+  })
+  const [deepLinkDone, setDeepLinkDone] = useState(false)
+
   useEffect(() => {
-    const target = new URLSearchParams(location.search).get('channel')
-    if (!target) return
-    window.history.replaceState({}, '', '/')
-    if (useStore.getState().channels.some((channel) => channel.id === target)) {
-      useStore.getState().setActiveChannel(target)
+    if (!deepLink || deepLinkDone) return
+    // Still waiting on the channel list, or the channel isn't one we can see.
+    // Re-checked whenever it changes, so a channel granted mid-session works.
+    if (!channels.some((entry) => entry.id === deepLink.channel)) return
+    setDeepLinkDone(true)
+    if (deepLink.message) {
+      // Loads the surrounding page and flashes it, rather than dropping the
+      // reader at the bottom of the channel and leaving them to scroll.
+      void useStore.getState().jumpToMessage(deepLink.channel, deepLink.message)
+    } else {
+      useStore.getState().setActiveChannel(deepLink.channel)
     }
-  }, [])
+  }, [deepLink, deepLinkDone, channels])
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -295,6 +321,7 @@ export default function Chat() {
                 channel={channel}
                 channelPermissions={perms}
                 onReply={setReplyTo}
+                onForward={setForwarding}
                 onOpenProfile={openProfile}
                 onOpenImage={setLightbox}
               />
@@ -359,6 +386,11 @@ export default function Chat() {
       <ScreenShareDialog open={screenShareOpen} onClose={() => setScreenShareOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} onOpenProfile={openProfile} />
+      <ForwardDialog
+        open={!!forwarding}
+        message={forwarding}
+        onClose={() => setForwarding(null)}
+      />
       <ChannelDialog
         open={channelDialog.open}
         channel={channelDialog.channel}
