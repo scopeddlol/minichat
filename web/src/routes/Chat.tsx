@@ -11,7 +11,8 @@ import SettingsModal from '../components/SettingsModal'
 import ScreenShareDialog from '../components/ScreenShareDialog'
 import Sidebar, { ChannelIcon } from '../components/Sidebar'
 import VoiceStage from '../components/VoiceStage'
-import { CreateChannelModal } from '../components/admin/Channels'
+import CategoryDialog from '../components/CategoryDialog'
+import ChannelDialog from '../components/ChannelDialog'
 import { CreateInviteModal } from '../components/admin/Invites'
 import { Modal, Spinner, EmptyState } from '../components/ui'
 import { api } from '../lib/api'
@@ -20,7 +21,7 @@ import { gateway } from '../lib/gateway'
 import { attachHotkeys, loadBindings } from '../lib/hotkeys'
 import { can, P } from '../lib/perms'
 import { pruneTyping, useStore } from '../lib/store'
-import type { Attachment, Message } from '../lib/types'
+import type { Attachment, Category, Channel, Message } from '../lib/types'
 import { useVoice } from '../lib/voice'
 
 export default function Chat() {
@@ -39,7 +40,14 @@ export default function Chat() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const [invitesOpen, setInvitesOpen] = useState(false)
-  const [createChannelOpen, setCreateChannelOpen] = useState(false)
+  // One dialog each, driven by what the sidebar's menus ask for. `channel`
+  // and `category` null means "create"; set means "edit".
+  const [channelDialog, setChannelDialog] = useState<
+    { open: boolean; channel: Channel | null; categoryId: string | null }
+  >({ open: false, channel: null, categoryId: null })
+  const [categoryDialog, setCategoryDialog] = useState<{ open: boolean; category: Category | null }>(
+    { open: false, category: null },
+  )
   const [profileId, setProfileId] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [pinsOpen, setPinsOpen] = useState(false)
@@ -152,7 +160,12 @@ export default function Chat() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenAdmin={() => setAdminOpen(true)}
           onOpenInvites={() => setInvitesOpen(true)}
-          onCreateChannel={() => setCreateChannelOpen(true)}
+          onCreateChannel={(categoryId) =>
+            setChannelDialog({ open: true, channel: null, categoryId: categoryId ?? null })
+          }
+          onEditChannel={(channel) => setChannelDialog({ open: true, channel, categoryId: null })}
+          onCreateCategory={() => setCategoryDialog({ open: true, category: null })}
+          onEditCategory={(category) => setCategoryDialog({ open: true, category })}
           onOpenProfile={openProfile}
         />
       </aside>
@@ -185,9 +198,21 @@ export default function Chat() {
                 setSidebarOpen(false)
                 setInvitesOpen(true)
               }}
-              onCreateChannel={() => {
+              onCreateChannel={(categoryId) => {
                 setSidebarOpen(false)
-                setCreateChannelOpen(true)
+                setChannelDialog({ open: true, channel: null, categoryId: categoryId ?? null })
+              }}
+              onEditChannel={(channel) => {
+                setSidebarOpen(false)
+                setChannelDialog({ open: true, channel, categoryId: null })
+              }}
+              onCreateCategory={() => {
+                setSidebarOpen(false)
+                setCategoryDialog({ open: true, category: null })
+              }}
+              onEditCategory={(category) => {
+                setSidebarOpen(false)
+                setCategoryDialog({ open: true, category })
               }}
               onOpenProfile={openProfile}
               onNavigate={() => setSidebarOpen(false)}
@@ -293,7 +318,10 @@ export default function Chat() {
               }
               action={
                 can(permissions, P.MANAGE_CHANNELS) ? (
-                  <button className="btn btn-primary" onClick={() => setCreateChannelOpen(true)}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => setChannelDialog({ open: true, channel: null, categoryId: null })}
+                  >
                     Create a channel
                   </button>
                 ) : undefined
@@ -331,7 +359,17 @@ export default function Chat() {
       <ScreenShareDialog open={screenShareOpen} onClose={() => setScreenShareOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} onOpenProfile={openProfile} />
-      <CreateChannelModal open={createChannelOpen} onClose={() => setCreateChannelOpen(false)} />
+      <ChannelDialog
+        open={channelDialog.open}
+        channel={channelDialog.channel}
+        defaultCategoryId={channelDialog.categoryId}
+        onClose={() => setChannelDialog((value) => ({ ...value, open: false }))}
+      />
+      <CategoryDialog
+        open={categoryDialog.open}
+        category={categoryDialog.category}
+        onClose={() => setCategoryDialog((value) => ({ ...value, open: false }))}
+      />
       <CreateInviteModal
         open={invitesOpen}
         onClose={() => setInvitesOpen(false)}

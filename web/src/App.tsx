@@ -3,6 +3,7 @@ import Auth from './routes/Auth'
 import Chat from './routes/Chat'
 import Setup from './routes/Setup'
 import TitleBar from './components/TitleBar'
+import { ContextMenuProvider } from './components/ContextMenu'
 import { ConfirmProvider, Spinner, ToastViewport } from './components/ui'
 import { applyTheme, effectiveTheme } from './lib/theme'
 import { useStore } from './lib/store'
@@ -33,35 +34,37 @@ export default function App() {
 
   return (
     <ConfirmProvider>
-      {/* Desktop only: the Tauri window is frameless, so MiniChat draws the
-          caption bar itself. `html.desktop` in index.css makes room for it. */}
-      <TitleBar />
+      <ContextMenuProvider>
+        {/* Desktop only: the Tauri window is frameless, so MiniChat draws the
+            caption bar itself. `html.desktop` in index.css makes room for it. */}
+        <TitleBar />
 
-      {phase === 'loading' && (
-        <div className="h-full flex items-center justify-center" style={{ color: 'var(--text-faint)' }}>
-          <Spinner size={24} />
-        </div>
-      )}
-
-      {phase === 'error' && (
-        <div className="h-full flex items-center justify-center p-6">
-          <div className="card p-8 text-center max-w-sm">
-            <h1 className="text-lg font-semibold">Can't reach the server</h1>
-            <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>
-              {bootError}
-            </p>
-            <button className="btn btn-primary mt-5 w-full" onClick={() => location.reload()}>
-              Try again
-            </button>
+        {phase === 'loading' && (
+          <div className="h-full flex items-center justify-center" style={{ color: 'var(--text-faint)' }}>
+            <Spinner size={24} />
           </div>
-        </div>
-      )}
+        )}
 
-      {phase === 'setup' && meta && <Setup meta={meta} />}
-      {phase === 'anonymous' && meta && <Auth meta={meta} inviteCode={inviteCode} />}
-      {phase === 'ready' && <Chat />}
+        {phase === 'error' && (
+          <div className="h-full flex items-center justify-center p-6">
+            <div className="card p-8 text-center max-w-sm">
+              <h1 className="text-lg font-semibold">Can't reach the server</h1>
+              <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>
+                {bootError}
+              </p>
+              <button className="btn btn-primary mt-5 w-full" onClick={() => location.reload()}>
+                Try again
+              </button>
+            </div>
+          </div>
+        )}
 
-      <ToastViewport />
+        {phase === 'setup' && meta && <Setup meta={meta} />}
+        {phase === 'anonymous' && meta && <Auth meta={meta} inviteCode={inviteCode} />}
+        {phase === 'ready' && <Chat />}
+
+        <ToastViewport />
+      </ContextMenuProvider>
     </ConfirmProvider>
   )
 }

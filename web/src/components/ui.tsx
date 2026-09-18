@@ -106,6 +106,13 @@ export function presenceLabel(presence: string): string {
 /* Modal                                                                       */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Open modals, outermost first.
+ *
+ * Shared by every `<Modal />` so Escape only reaches the topmost one.
+ */
+const modalStack: object[] = []
+
 export function Modal({
   open,
   onClose,
@@ -129,11 +136,21 @@ export function Modal({
 
   useEffect(() => {
     if (!open) return
+
+    // Modals nest — the admin panel opens the channel dialog, and both are
+    // Modals. Only the last one opened may act on Escape, or one keypress
+    // closes the dialog *and* the panel behind it.
+    const token = {}
+    modalStack.push(token)
+
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
+      if (modalStack[modalStack.length - 1] !== token) return
       // A dropdown open inside the modal owns Escape first — dismissing a
       // picker shouldn't also throw away the dialog you were filling in.
       if (document.querySelector('[role="listbox"]')) return
+      // So does a right-click menu, which handles Escape in capture phase.
+      if (document.querySelector('[role="menu"]')) return
       onClose()
     }
     document.addEventListener('keydown', onKey)
@@ -141,7 +158,11 @@ export function Modal({
     document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = previous
+      const at = modalStack.indexOf(token)
+      if (at !== -1) modalStack.splice(at, 1)
+      // Only the outermost modal should give scrolling back; an inner one
+      // closing must leave the page locked for the one still open.
+      if (modalStack.length === 0) document.body.style.overflow = previous
     }
   }, [open, onClose])
 

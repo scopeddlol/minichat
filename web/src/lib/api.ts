@@ -126,7 +126,9 @@ export const api = {
 
   channels: () => get<Channel[]>('/channels'),
   channelPermissions: () => get<Record<string, string>>('/channels/permissions'),
-  createChannel: (payload: Partial<Channel> & { name: string }) => post<Channel>('/channels', payload),
+  createChannel: (
+    payload: Partial<Channel> & { name: string; allowed_role_ids?: string[] },
+  ) => post<Channel>('/channels', payload),
   updateChannel: (id: string, payload: Record<string, unknown>) =>
     patch<Channel>(`/channels/${id}`, payload),
   deleteChannel: (id: string) => del<{ ok: boolean }>(`/channels/${id}`),

@@ -1,20 +1,27 @@
 import {
-  ChevronDown, Hash, Headphones, Megaphone, Mic, MicOff, Plus, ScreenShare, Settings,
-  Shield, Sparkles, UserPlus, Video, Volume2, VolumeX, PhoneOff, Users,
+  ChevronDown, FolderPlus, Hash, Headphones, Link2, Lock, Megaphone, Mic, MicOff, Pencil, Plus,
+  ScreenShare, Settings, Shield, Sparkles, Trash2, UserPlus, Video, Volume2, VolumeX,
+  PhoneOff, Users,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { api } from '../lib/api'
 import { can, P } from '../lib/perms'
 import { useStore } from '../lib/store'
 import { useVoice } from '../lib/voice'
-import type { Channel } from '../lib/types'
-import { Avatar, toast } from './ui'
+import type { Category, Channel } from '../lib/types'
+import { useContextMenu, useLongPress, type MenuItem } from './ContextMenu'
+import { Avatar, copyText, toast, useConfirm } from './ui'
 
 interface SidebarProps {
   onPickScreenShare: () => void
   onOpenSettings: () => void
   onOpenAdmin: () => void
   onOpenInvites: () => void
-  onCreateChannel: () => void
+  /** Create a channel, optionally inside a category. */
+  onCreateChannel: (categoryId?: string) => void
+  onEditChannel: (channel: Channel) => void
+  onCreateCategory: () => void
+  onEditCategory: (category: Category) => void
   onOpenProfile: (userId: string) => void
   onNavigate?: () => void
 }
@@ -25,6 +32,9 @@ export default function Sidebar({
   onOpenAdmin,
   onOpenInvites,
   onCreateChannel,
+  onEditChannel,
+  onCreateCategory,
+  onEditCategory,
   onOpenProfile,
   onNavigate,
 }: SidebarProps) {
@@ -37,6 +47,91 @@ export default function Sidebar({
   const unread = useStore((s) => s.unread)
   const mentionCounts = useStore((s) => s.mentionCounts)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+
+  /** Right-click on a channel row. */
+  const channelMenu = (channel: Channel): MenuItem[] => {
+    const items: MenuItem[] = [
+      {
+        label: 'Copy link',
+        icon: <Link2 size={14} />,
+        onSelect: () => void copyText(`${location.origin}/?channel=${channel.id}`, 'Channel link copied'),
+      },
+    ]
+    if (canManageChannels) {
+      items.push(
+        { separator: true },
+        { label: 'Edit channel', icon: <Pencil size={14} />, onSelect: () => onEditChannel(channel) },
+        {
+          label: 'Create channel here',
+          icon: <Plus size={14} />,
+          onSelect: () => onCreateChannel(channel.category_id ?? undefined),
+        },
+        { separator: true },
+        {
+          label: 'Delete channel',
+          icon: <Trash2 size={14} />,
+          danger: true,
+          onSelect: async () => {
+            const ok = await confirm({
+              title: `Delete ${channel.name}?`,
+              body: 'Its messages go with it. This cannot be undone.',
+              confirmLabel: 'Delete',
+              danger: true,
+            })
+            if (!ok) return
+            try {
+              await api.deleteChannel(channel.id)
+            } catch {
+              toast.error('Could not delete the channel.')
+            }
+          },
+        },
+      )
+    }
+    return items
+  }
+
+  /** Right-click on a category heading. */
+  const categoryMenu = (category: Category): MenuItem[] => {
+    if (!canManageChannels) return []
+    return [
+      {
+        label: 'Create channel here',
+        icon: <Plus size={14} />,
+        onSelect: () => onCreateChannel(category.id),
+      },
+      { label: 'Edit category', icon: <Pencil size={14} />, onSelect: () => onEditCategory(category) },
+      { separator: true },
+      {
+        label: 'Delete category',
+        icon: <Trash2 size={14} />,
+        danger: true,
+        onSelect: async () => {
+          const ok = await confirm({
+            title: `Delete ${category.name}?`,
+            body: 'Its channels stay, but become uncategorised.',
+            confirmLabel: 'Delete',
+            danger: true,
+          })
+          if (!ok) return
+          try {
+            await api.deleteCategory(category.id)
+          } catch {
+            toast.error('Could not delete the category.')
+          }
+        },
+      },
+    ]
+  }
+
+  /** Right-click on empty space in the channel list. */
+  const listMenu = (): MenuItem[] => {
+    if (!canManageChannels) return []
+    return [
+      { label: 'Create channel', icon: <Plus size={14} />, onSelect: () => onCreateChannel() },
+      { label: 'Create category', icon: <FolderPlus size={14} />, onSelect: onCreateCategory },
+    ]
+  }
 
   const grouped = useMemo(() => {
     const byCategory = new Map<string, Channel[]>()
@@ -52,6 +147,9 @@ export default function Sidebar({
     }
     return { byCategory, uncategorised }
   }, [channels, categories])
+
+  const menu = useContextMenu()
+  const confirm = useConfirm()
 
   const canManageChannels = can(permissions, P.MANAGE_CHANNELS)
   const canInvite = can(permissions, P.CREATE_INVITES)
@@ -124,7 +222,15 @@ export default function Sidebar({
       </header>
 
       {/* Channels */}
-      <nav className="flex-1 overflow-y-auto scroll-thin px-2 py-3 space-y-4">
+      <nav
+        className="flex-1 overflow-y-auto scroll-thin px-2 py-3 space-y-4"
+        onContextMenu={(event) => {
+          // Only empty space: a right-click that landed on a row is that
+          // row's menu, handled by the row itself.
+          if (event.target !== event.currentTarget) return
+          menu.open(event, listMenu())
+        }}
+      >
         {grouped.uncategorised.length > 0 && (
           <ChannelGroup
             channels={grouped.uncategorised}
@@ -133,6 +239,7 @@ export default function Sidebar({
             mentionCounts={mentionCounts}
             onSelect={select}
             onOpenProfile={onOpenProfile}
+            buildMenu={channelMenu}
           />
         )}
 
@@ -145,6 +252,7 @@ export default function Sidebar({
               <button
                 className="w-full flex items-center gap-1 px-1.5 mb-1 group"
                 onClick={() => setCollapsed((value) => ({ ...value, [category.id]: !value[category.id] }))}
+                onContextMenu={(event) => menu.open(event, categoryMenu(category))}
               >
                 <ChevronDown
                   size={12}
@@ -160,6 +268,14 @@ export default function Sidebar({
                 >
                   {category.name}
                 </span>
+                {category.is_private && (
+                  <Lock
+                    size={10}
+                    className="shrink-0"
+                    style={{ color: 'var(--text-faint)' }}
+                    aria-label="Private category"
+                  />
+                )}
               </button>
               {!isCollapsed && (
                 <ChannelGroup
@@ -169,6 +285,7 @@ export default function Sidebar({
                   mentionCounts={mentionCounts}
                   onSelect={select}
                   onOpenProfile={onOpenProfile}
+                  buildMenu={channelMenu}
                 />
               )}
             </div>
@@ -179,7 +296,7 @@ export default function Sidebar({
           <button
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors hover:bg-[var(--surface-2)]"
             style={{ color: 'var(--text-faint)' }}
-            onClick={onCreateChannel}
+            onClick={() => onCreateChannel()}
           >
             <Plus size={15} />
             Create channel
@@ -204,6 +321,57 @@ export default function Sidebar({
   )
 }
 
+/**
+ * One channel in the sidebar.
+ *
+ * Exists as a component so each row can own a long-press timer of its own —
+ * touch screens have no right-click, and hooks can't be called inside the map
+ * that renders the list.
+ */
+function ChannelRow({
+  channel,
+  active,
+  unreadCount,
+  buildMenu,
+  onSelect,
+  children,
+}: {
+  channel: Channel
+  active: boolean
+  /** Drives the bold-and-brighter treatment an unread channel gets. */
+  unreadCount: number
+  buildMenu: (channel: Channel) => MenuItem[]
+  onSelect: (channel: Channel) => void
+  children: React.ReactNode
+}) {
+  const menu = useContextMenu()
+  const longPress = useLongPress((point) =>
+    menu.open({ ...point, preventDefault: () => undefined }, buildMenu(channel)),
+  )
+
+  return (
+    <button
+      onClick={() => onSelect(channel)}
+      onContextMenu={(event) => menu.open(event, buildMenu(channel))}
+      {...longPress}
+      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors group"
+      style={{
+        background: active ? 'var(--surface-2)' : 'transparent',
+        color: active || unreadCount > 0 ? 'var(--text)' : 'var(--text-muted)',
+        fontWeight: unreadCount > 0 ? 600 : 500,
+      }}
+      onMouseEnter={(event) => {
+        if (!active) event.currentTarget.style.background = 'var(--surface-1)'
+      }}
+      onMouseLeave={(event) => {
+        if (!active) event.currentTarget.style.background = 'transparent'
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 function ChannelGroup({
   channels,
   activeChannelId,
@@ -211,6 +379,7 @@ function ChannelGroup({
   mentionCounts,
   onSelect,
   onOpenProfile,
+  buildMenu,
 }: {
   channels: Channel[]
   activeChannelId: string | null
@@ -218,6 +387,7 @@ function ChannelGroup({
   mentionCounts: Record<string, number>
   onSelect: (channel: Channel) => void
   onOpenProfile: (userId: string) => void
+  buildMenu: (channel: Channel) => MenuItem[]
 }) {
   const voiceStates = useStore((s) => s.voiceStates)
   const members = useStore((s) => s.members)
@@ -232,20 +402,12 @@ function ChannelGroup({
 
         return (
           <div key={channel.id}>
-            <button
-              onClick={() => onSelect(channel)}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors group"
-              style={{
-                background: active ? 'var(--surface-2)' : 'transparent',
-                color: active ? 'var(--text)' : count > 0 ? 'var(--text)' : 'var(--text-muted)',
-                fontWeight: count > 0 ? 600 : 500,
-              }}
-              onMouseEnter={(event) => {
-                if (!active) event.currentTarget.style.background = 'var(--surface-1)'
-              }}
-              onMouseLeave={(event) => {
-                if (!active) event.currentTarget.style.background = 'transparent'
-              }}
+            <ChannelRow
+              channel={channel}
+              active={active}
+              unreadCount={count}
+              buildMenu={buildMenu}
+              onSelect={onSelect}
             >
               <ChannelIcon kind={channel.kind} isPrivate={channel.is_private} emoji={channel.emoji} />
               <span className="flex-1 min-w-0 text-left">
@@ -283,7 +445,7 @@ function ChannelGroup({
                   {count > 99 ? '99+' : count}
                 </span>
               ) : null}
-            </button>
+            </ChannelRow>
 
             {/* Who's in this voice channel */}
             {channel.kind === 'voice' && occupants.length > 0 && (
