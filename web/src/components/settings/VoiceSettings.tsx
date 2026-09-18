@@ -212,6 +212,7 @@ export default function VoiceSettings() {
                   id={member.id}
                   name={member.display_name}
                   src={member.avatar_url}
+                  frame={member.avatar_frame}
                   accent={member.accent_color}
                   size="sm"
                 />

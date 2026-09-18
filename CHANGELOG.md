@@ -11,6 +11,6 @@
 
 ### Deployment
 
-Back up the SQLite database before upgrading. The server applies migration 0004 on startup. Calls require the existing LiveKit configuration and HTTPS, just like community voice channels. Direct messages in this release support text; channel attachments, reactions, and search remain channel features. Calls ring while MiniChat is open; they do not wake an offline device. Messages are stored on the instance and are not end-to-end encrypted.
+Back up the SQLite database before upgrading. The server applies migrations 0004 and 0005 on startup. Calls require the existing LiveKit configuration and HTTPS, just like community voice channels. Direct messages in this release support text; channel attachments, reactions, and search remain channel features. Calls ring while MiniChat is open; they do not wake an offline device. Messages are stored on the instance and are not end-to-end encrypted.
 
 Images: `ghcr.io/scopeddlol/minichat:v0.4.0` for Linux amd64 and arm64. Windows MSI and EXE installers are attached to the draft GitHub release by the desktop workflow.

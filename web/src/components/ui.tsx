@@ -1,17 +1,38 @@
 import { X } from 'lucide-react'
 import {
   createContext, useCallback, useContext, useEffect, useId, useRef, useState,
-  type ReactNode,
+  type CSSProperties, type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { create } from 'zustand'
 import { avatarGradient, initials } from '../lib/format'
+import type { ImageFrame } from '../lib/types'
 
 /* -------------------------------------------------------------------------- */
 /* Avatar                                                                      */
 /* -------------------------------------------------------------------------- */
 
 const SIZES = { xs: 20, sm: 28, md: 36, lg: 44, xl: 80, xxl: 112 } as const
+
+/**
+ * A stored frame as CSS.
+ *
+ * `object-position` moves the focal point and `scale` zooms, which together
+ * reproduce a drag-and-pinch crop without touching the uploaded file. An
+ * absent or default frame produces no style at all, so the overwhelmingly
+ * common case stays a plain `object-cover` image.
+ */
+export function frameStyle(frame?: ImageFrame | null): CSSProperties | undefined {
+  if (!frame) return undefined
+  const centred = frame.x === 50 && frame.y === 50
+  if (centred && frame.zoom === 1) return undefined
+  return {
+    objectPosition: `${frame.x}% ${frame.y}%`,
+    transform: frame.zoom === 1 ? undefined : `scale(${frame.zoom})`,
+    // Scaling from the focal point, so zooming in keeps the chosen spot put.
+    transformOrigin: `${frame.x}% ${frame.y}%`,
+  }
+}
 
 export function Avatar({
   name,
@@ -21,6 +42,7 @@ export function Avatar({
   size = 'md',
   presence,
   ring,
+  frame,
   className = '',
 }: {
   name: string
@@ -30,6 +52,8 @@ export function Avatar({
   size?: keyof typeof SIZES
   presence?: 'online' | 'idle' | 'dnd' | 'offline'
   ring?: boolean
+  /** How the owner positioned the image; centred and unzoomed when absent. */
+  frame?: ImageFrame | null
   className?: string
 }) {
   const [broken, setBroken] = useState(false)
@@ -52,6 +76,7 @@ export function Avatar({
             alt=""
             loading="lazy"
             className="w-full h-full object-cover"
+            style={frameStyle(frame)}
             onError={() => setBroken(true)}
           />
         ) : (
@@ -106,6 +131,13 @@ export function presenceLabel(presence: string): string {
 /* Modal                                                                       */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Open modals, outermost first.
+ *
+ * Shared by every `<Modal />` so Escape only reaches the topmost one.
+ */
+const modalStack: object[] = []
+
 export function Modal({
   open,
   onClose,
@@ -131,12 +163,19 @@ export function Modal({
   useEffect(() => {
     if (!open) return
     const previous = document.activeElement as HTMLElement | null
-    dialogRef.current?.focus()
+    if (!dialogRef.current?.contains(document.activeElement)) dialogRef.current?.focus()
     return () => { if (previous?.isConnected) previous.focus() }
   }, [open])
 
   useEffect(() => {
     if (!open) return
+
+    // Modals nest — the admin panel opens the channel dialog, and both are
+    // Modals. Only the last one opened may act on Escape, or one keypress
+    // closes the dialog *and* the panel behind it.
+    const token = {}
+    modalStack.push(token)
+
     const onKey = (event: KeyboardEvent) => {
       const dialogs = document.querySelectorAll('[role="dialog"]')
       if (dialogs[dialogs.length - 1] !== dialogRef.current) return
@@ -149,9 +188,12 @@ export function Modal({
         else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialogRef.current)) { event.preventDefault(); first.focus() }
       }
       if (event.key !== 'Escape') return
+      if (modalStack[modalStack.length - 1] !== token) return
       // A dropdown open inside the modal owns Escape first — dismissing a
       // picker shouldn't also throw away the dialog you were filling in.
-      if (document.querySelector('[role="listbox"], [role="menu"]')) return
+      if (document.querySelector('[role="listbox"]')) return
+      // So does a right-click menu, which handles Escape in capture phase.
+      if (document.querySelector('[role="menu"]')) return
       onClose()
     }
     document.addEventListener('keydown', onKey)
@@ -159,7 +201,11 @@ export function Modal({
     document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = previous
+      const at = modalStack.indexOf(token)
+      if (at !== -1) modalStack.splice(at, 1)
+      // Only the outermost modal should give scrolling back; an inner one
+      // closing must leave the page locked for the one still open.
+      if (modalStack.length === 0) document.body.style.overflow = previous
     }
   }, [open, onClose])
 

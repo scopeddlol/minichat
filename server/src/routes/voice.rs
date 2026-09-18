@@ -72,8 +72,16 @@ pub async fn token(
     })))
 }
 
-pub async fn states(State(state): State<AppState>, _auth: Auth) -> AppResult<Json<Value>> {
-    Ok(Json(json!(state.voice_states().await)))
+pub async fn states(State(state): State<AppState>, auth: Auth) -> AppResult<Json<Value>> {
+    let visible =
+        access::visible_channel_ids(&state, &auth.role_ids, auth.can(perms::ADMINISTRATOR)).await?;
+    let states: Vec<_> = state
+        .voice_states()
+        .await
+        .into_iter()
+        .filter(|voice| visible.contains(&voice.channel_id))
+        .collect();
+    Ok(Json(json!(states)))
 }
 
 /// Moderator action: drop someone from voice. The client watching for this

@@ -1,261 +1,273 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState,
+  type ReactNode,
+} from 'react'
 import { createPortal } from 'react-dom'
-import { api } from '../lib/api'
-import { can, P } from '../lib/perms'
-import { useStore } from '../lib/store'
-import { useInbox } from '../lib/direct'
-import { Modal, toast } from './ui'
-import { ChannelEditor } from './admin/Channels'
-import type { ContextRequest } from '../lib/context'
 
-type Item = { label: string; run: () => void | Promise<unknown> }
-type Menu = { x: number; y: number; title: string; items: Item[]; trigger: HTMLElement }
-export default function ContextMenu({
-  onProfile,
-  onCreate,
-}: {
-  onProfile: (id: string) => void
-  onCreate: () => void
-}) {
-  const [menu, setMenu] = useState<Menu | null>(null)
-  const [editChannel, setEditChannel] = useState<string | null>(null)
-  const [editMember, setEditMember] = useState<string | null>(null)
-  const [nickname, setNickname] = useState('')
-  const [busy, setBusy] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const { members, roles, channels, me, permissions } = useStore()
-  const member = editMember ? members[editMember] : null
-  const channel = channels.find((c) => c.id === editChannel)
-  const act = async (fn: () => Promise<unknown>) => {
-    setBusy(true)
-    try {
-      await fn()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Action failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-  useEffect(() => {
-    const custom = (event: Event) => setMenu((event as CustomEvent<ContextRequest>).detail)
-    window.addEventListener('minichat:context-menu', custom)
-    return () => window.removeEventListener('minichat:context-menu', custom)
+/**
+ * Right-click menus.
+ *
+ * One menu element lives at the root and every caller opens it through
+ * `useContextMenu()`, so there is a single source of truth for what is open,
+ * a single Escape handler and a single outside-click handler. Opening a menu
+ * while another is open replaces it rather than stacking.
+ *
+ * Positioning follows the pointer and flips at the viewport edge, the same
+ * rule `<Select />` uses, because a menu that opens off-screen in the desktop
+ * app is the exact class of bug the custom dropdown was built to avoid.
+ *
+ * On touch screens there is no right-click, so the same items are opened by a
+ * long press and rendered as a bottom sheet.
+ */
+
+export interface MenuItem {
+  /** A separator; every other field is ignored. */
+  separator?: boolean
+  label?: string
+  icon?: ReactNode
+  /** Right-aligned hint, for a shortcut like "Shift+Click". */
+  hint?: string
+  danger?: boolean
+  disabled?: boolean
+  onSelect?: () => void
+}
+
+interface MenuState {
+  x: number
+  y: number
+  items: MenuItem[]
+}
+
+interface ContextMenuApi {
+  /** Open at the event's position. Also calls preventDefault for you. */
+  open: (event: { clientX: number; clientY: number; preventDefault: () => void }, items: MenuItem[]) => void
+  close: () => void
+}
+
+const Ctx = createContext<ContextMenuApi | null>(null)
+
+/** Everything a right-click menu needs, minus the menu itself. */
+export function useContextMenu(): ContextMenuApi {
+  const api = useContext(Ctx)
+  if (!api) throw new Error('useContextMenu used outside <ContextMenuProvider>')
+  return api
+}
+
+const SHEET_BREAKPOINT = 640
+const MENU_WIDTH = 210
+
+export function ContextMenuProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<MenuState | null>(null)
+
+  const open = useCallback<ContextMenuApi['open']>((event, items) => {
+    event.preventDefault()
+    // An empty menu would be a blank box; let the browser do nothing instead.
+    if (items.length === 0) return
+    setState({ x: event.clientX, y: event.clientY, items })
   }, [])
-  useEffect(() => {
-    const open = (event: MouseEvent | KeyboardEvent) => {
-      if (
-        event instanceof KeyboardEvent &&
-        !(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))
-      )
-        return
-      const target = (event.target as HTMLElement).closest<HTMLElement>(
-        '[data-user-id], [data-channel-id], [data-channel-list]',
-      )
-      if (!target || (event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')) return
-      const state = useStore.getState()
-      const items: Item[] = []
-      let title = 'Channels'
-      const userId = target.dataset.userId
-      const channelId = target.dataset.channelId
-      if (userId && state.members[userId]) {
-        const user = state.members[userId]
-        title = user.display_name
-        items.push({ label: 'View profile', run: () => onProfile(userId) })
-        if (userId !== state.me?.id)
-          items.push({ label: 'Message', run: () => useInbox.getState().openPeer(userId) })
-        const rank = (ids: string[]) =>
-          Math.max(0, ...state.roles.filter((r) => ids.includes(r.id)).map((r) => r.position))
-        const manageable =
-          !user.is_operator &&
-          userId !== state.me?.id &&
-          (state.me?.is_operator || rank(state.me?.roles ?? []) > rank(user.roles))
-        if (
-          manageable &&
-          (can(state.permissions, P.MANAGE_ROLES) || can(state.permissions, P.MANAGE_NICKNAMES))
-        )
-          items.push({
-            label: 'Roles & nickname',
-            run: () => {
-              setEditMember(userId)
-              setNickname(user.display_name)
-            },
-          })
-        items.push({ label: 'Copy member ID', run: () => navigator.clipboard.writeText(userId) })
-      } else if (channelId) {
-        const c = state.channels.find((c) => c.id === channelId)
-        if (!c) return
-        title = c.name
-        items.push({
-          label: 'Open channel',
-          run: () => {
-            useInbox.setState({ open: false })
-            state.setActiveChannel(channelId)
-          },
-        })
-        if (can(state.permissions, P.MANAGE_CHANNELS))
-          items.push({ label: 'Edit channel & permissions', run: () => setEditChannel(channelId) })
-        items.push({ label: 'Copy channel ID', run: () => navigator.clipboard.writeText(channelId) })
-      } else if (can(state.permissions, P.MANAGE_CHANNELS))
-        items.push({ label: 'Create channel', run: onCreate })
-      if (!items.length) return
-      event.preventDefault()
-      const rect = target.getBoundingClientRect()
-      setMenu({
-        x: event instanceof MouseEvent ? event.clientX : rect.left + 12,
-        y: event instanceof MouseEvent ? event.clientY : rect.bottom,
-        title,
-        items,
-        trigger: target,
-      })
-    }
-    document.addEventListener('contextmenu', open)
-    document.addEventListener('keydown', open)
-    return () => {
-      document.removeEventListener('contextmenu', open)
-      document.removeEventListener('keydown', open)
-    }
-  }, [onProfile, onCreate])
-  useLayoutEffect(() => {
-    if (!menu || !ref.current) return
-    const el = ref.current
-    el.style.left = `${Math.max(8, Math.min(menu.x, innerWidth - el.offsetWidth - 8))}px`
-    el.style.top = `${Math.max(8, Math.min(menu.y, innerHeight - el.offsetHeight - 8))}px`
-    el.querySelector('button')?.focus()
-  }, [menu])
-  useEffect(() => {
-    if (!menu) return
-    const close = (e: Event) => {
-      if (!ref.current?.contains(e.target as Node)) setMenu(null)
-    }
-    const resize = () => setMenu(null)
-    document.addEventListener('pointerdown', close)
-    document.addEventListener('scroll', close, true)
-    window.addEventListener('resize', resize)
-    return () => {
-      document.removeEventListener('pointerdown', close)
-      document.removeEventListener('scroll', close, true)
-      window.removeEventListener('resize', resize)
-    }
-  }, [menu])
-  const topRank = Math.max(0, ...roles.filter((r) => me?.roles.includes(r.id)).map((r) => r.position))
+  const close = useCallback(() => setState(null), [])
+
   return (
-    <>
-      {menu &&
-        createPortal(
-          <div
-            ref={ref}
-            role="menu"
-            aria-label={menu.title}
-            className="context-menu"
-            style={{ left: menu.x, top: menu.y }}
-            onKeyDown={(e) => {
-              const buttons = [...ref.current!.querySelectorAll('button')]
-              const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
-              if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
-                e.preventDefault()
-                buttons[
-                  e.key === 'Home'
-                    ? 0
-                    : e.key === 'End'
-                      ? buttons.length - 1
-                      : (index + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
-                ]?.focus()
-              }
-              if (e.key === 'Escape' || e.key === 'Tab') {
-                e.preventDefault()
-                e.stopPropagation()
-                menu.trigger.focus()
-                setMenu(null)
-              }
-            }}
-          >
-            <p className="truncate px-3 py-2 text-xs text-[var(--text-muted)]">{menu.title}</p>
-            {menu.items.map((item) => (
-              <button
-                role="menuitem"
-                key={item.label}
-                onClick={() => {
-                  setMenu(null)
-                  void Promise.resolve()
-                    .then(item.run)
-                    .catch((e) => toast.error(e.message))
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>,
-          document.body,
-        )}
-      <Modal open={Boolean(channel)} onClose={() => setEditChannel(null)} title="Channel settings" width="lg">
-        {channel && (
-          <div className="p-6">
-            <ChannelEditor key={channel.id} channel={channel} onDeleted={() => setEditChannel(null)} />
-          </div>
-        )}
-      </Modal>
-      <Modal
-        open={Boolean(member)}
-        onClose={() => setEditMember(null)}
-        title={`Manage ${member?.display_name ?? 'member'}`}
-      >
-        {member && (
-          <div className="p-6 space-y-6">
-            {can(permissions, P.MANAGE_NICKNAMES) && (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  void act(() => api.updateMember(member.id, { display_name: nickname })).then(
-                    () => undefined,
-                  )
-                }}
-              >
-                <label className="label" htmlFor="member-nickname">
-                  Community nickname
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="member-nickname"
-                    className="input min-w-0"
-                    value={nickname}
-                    maxLength={48}
-                    onChange={(e) => setNickname(e.target.value)}
-                  />
-                  <button className="btn btn-subtle" disabled={busy || !nickname.trim()}>
-                    Save
-                  </button>
-                </div>
-              </form>
-            )}
-            {can(permissions, P.MANAGE_ROLES) && (
-              <div>
-                <h3 className="label">Roles</h3>
-                <div className="space-y-2">
-                  {roles
-                    .filter((r) => !r.is_default && (me?.is_operator || r.position < topRank))
-                    .map((role) => (
-                      <label className="flex items-center gap-3 py-2" key={role.id}>
-                        <input
-                          type="checkbox"
-                          disabled={busy}
-                          checked={member.roles.includes(role.id)}
-                          onChange={(e) =>
-                            void act(() =>
-                              e.target.checked
-                                ? api.addMemberRole(member.id, role.id)
-                                : api.removeMemberRole(member.id, role.id),
-                            )
-                          }
-                        />
-                        <span>{role.name}</span>
-                      </label>
-                    ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
-    </>
+    <Ctx.Provider value={{ open, close }}>
+      {children}
+      {state && <Menu state={state} onClose={close} />}
+    </Ctx.Provider>
   )
+}
+
+function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const [active, setActive] = useState(-1)
+  const sheet = typeof window !== 'undefined' && window.innerWidth < SHEET_BREAKPOINT
+
+  const selectable = state.items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !item.separator && !item.disabled)
+
+  // Measured, then placed: the menu's height depends on its items, and
+  // guessing it puts the last item under the taskbar often enough to matter.
+  useLayoutEffect(() => {
+    if (sheet) return
+    const height = ref.current?.offsetHeight ?? 0
+    const width = ref.current?.offsetWidth ?? MENU_WIDTH
+    const margin = 8
+    setPos({
+      left: Math.max(margin, Math.min(state.x, window.innerWidth - width - margin)),
+      top: Math.max(margin, Math.min(state.y, window.innerHeight - height - margin)),
+    })
+  }, [state, sheet])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        onClose()
+        return
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const order = event.key === 'ArrowDown' ? selectable : [...selectable].reverse()
+        const next = order.find(({ index }) =>
+          event.key === 'ArrowDown' ? index > active : index < active,
+        )
+        setActive((next ?? order[0])?.index ?? -1)
+        return
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        const chosen = state.items[active]
+        if (chosen && !chosen.separator && !chosen.disabled) {
+          event.preventDefault()
+          onClose()
+          chosen.onSelect?.()
+        }
+      }
+    }
+    // Capture, so Escape closes the menu before a dialog underneath sees it.
+    document.addEventListener('keydown', onKey, true)
+    // Any scroll or resize invalidates the anchor point entirely; a menu is
+    // short-lived, so closing beats trying to follow.
+    const onMove = () => onClose()
+    window.addEventListener('scroll', onMove, true)
+    window.addEventListener('resize', onMove)
+    window.addEventListener('blur', onMove)
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('scroll', onMove, true)
+      window.removeEventListener('resize', onMove)
+      window.removeEventListener('blur', onMove)
+    }
+  }, [active, onClose, selectable, state.items])
+
+  const items = state.items.map((item, index) =>
+    item.separator ? (
+      <div key={index} className="my-1 border-t" style={{ borderColor: 'var(--border-soft)' }} />
+    ) : (
+      <button
+        key={index}
+        type="button"
+        role="menuitem"
+        disabled={item.disabled}
+        onMouseEnter={() => setActive(index)}
+        onClick={() => {
+          onClose()
+          item.onSelect?.()
+        }}
+        className="w-full flex items-center gap-2.5 px-2.5 py-2 sm:py-1.5 rounded-lg text-sm text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        style={{
+          color: item.disabled
+            ? 'var(--text-faint)'
+            : item.danger
+              ? 'var(--danger)'
+              : 'var(--text)',
+          background:
+            active === index && !item.disabled
+              ? item.danger
+                ? 'color-mix(in oklab, var(--danger) 16%, transparent)'
+                : 'var(--surface-2)'
+              : 'transparent',
+        }}
+      >
+        <span className="shrink-0 grid place-items-center w-4" style={{ opacity: 0.85 }}>
+          {item.icon}
+        </span>
+        <span className="flex-1 truncate">{item.label}</span>
+        {item.hint && (
+          <span className="text-[0.68rem] shrink-0" style={{ color: 'var(--text-faint)' }}>
+            {item.hint}
+          </span>
+        )}
+      </button>
+    ),
+  )
+
+  return createPortal(
+    <>
+      {/* Swallows the click that dismisses, so it can't also activate
+          whatever sits underneath the menu. */}
+      <div
+        className="fixed inset-0 z-[84]"
+        onMouseDown={(event) => {
+          event.preventDefault()
+          onClose()
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          onClose()
+        }}
+      />
+      <div
+        ref={ref}
+        role="menu"
+        aria-orientation="vertical"
+        className={
+          sheet
+            ? 'fixed z-[85] card p-1.5 left-2 right-2 bottom-2 animate-pop-in'
+            : 'fixed z-[85] card p-1.5 animate-pop-in'
+        }
+        style={
+          sheet
+            ? {
+                boxShadow: 'var(--shadow-lg)',
+                paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))',
+              }
+            : {
+                minWidth: MENU_WIDTH,
+                maxWidth: 320,
+                boxShadow: 'var(--shadow-lg)',
+                left: pos?.left ?? state.x,
+                top: pos?.top ?? state.y,
+                // Hidden for the one frame between mount and measurement, so
+                // the menu never visibly jumps into place.
+                visibility: pos ? 'visible' : 'hidden',
+              }
+        }
+      >
+        {items}
+      </div>
+    </>,
+    document.body,
+  )
+}
+
+/**
+ * Long-press handlers, for the touch screens that have no right-click.
+ *
+ * Returns props to spread onto the element that should open the menu. The
+ * press is cancelled by movement so it doesn't fire while scrolling the
+ * channel list or the message log.
+ */
+export function useLongPress(onTrigger: (point: { clientX: number; clientY: number }) => void) {
+  const timer = useRef<number | null>(null)
+  const start = useRef<{ x: number; y: number } | null>(null)
+
+  const cancel = useCallback(() => {
+    if (timer.current !== null) window.clearTimeout(timer.current)
+    timer.current = null
+    start.current = null
+  }, [])
+
+  useEffect(() => cancel, [cancel])
+
+  return {
+    onTouchStart: (event: React.TouchEvent) => {
+      const touch = event.touches[0]
+      if (!touch) return
+      start.current = { x: touch.clientX, y: touch.clientY }
+      timer.current = window.setTimeout(() => {
+        timer.current = null
+        onTrigger({ clientX: touch.clientX, clientY: touch.clientY })
+      }, 450)
+    },
+    onTouchMove: (event: React.TouchEvent) => {
+      const touch = event.touches[0]
+      if (!touch || !start.current) return
+      const moved =
+        Math.abs(touch.clientX - start.current.x) > 10 ||
+        Math.abs(touch.clientY - start.current.y) > 10
+      if (moved) cancel()
+    },
+    onTouchEnd: cancel,
+    onTouchCancel: cancel,
+  }
 }

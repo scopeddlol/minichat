@@ -106,6 +106,35 @@ pub async fn get_channel(state: &AppState, channel_id: &str) -> AppResult<Channe
         .ok_or_else(|| AppError::not_found("Channel not found."))
 }
 
+pub async fn visible_categories(state: &AppState, auth: &Auth) -> AppResult<Vec<Category>> {
+    let categories: Vec<Category> =
+        sqlx::query_as("SELECT * FROM categories ORDER BY position, name")
+            .fetch_all(&state.db)
+            .await?;
+    if auth.can(perms::ADMINISTRATOR) {
+        return Ok(categories);
+    }
+    let overwrites: Vec<(String, String, i64, i64)> =
+        sqlx::query_as("SELECT category_id,role_id,allow,deny FROM category_overwrites")
+            .fetch_all(&state.db)
+            .await?;
+    Ok(categories
+        .into_iter()
+        .filter(|category| {
+            if !category.is_private {
+                return true;
+            }
+            let (allow, deny) = overwrites
+                .iter()
+                .filter(|(id, role, _, _)| id == &category.id && auth.role_ids.contains(role))
+                .fold((0, 0), |(a, d), (_, _, next_a, next_d)| {
+                    (a | next_a, d | next_d)
+                });
+            perms::has((auth.permissions & !deny) | allow, perms::VIEW_CHANNELS)
+        })
+        .collect())
+}
+
 /// Channel IDs a set of roles can view. Used by the gateway to filter events
 /// without re-running permission logic per message.
 pub async fn visible_channel_ids(

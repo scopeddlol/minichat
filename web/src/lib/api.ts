@@ -1,5 +1,6 @@
 import type {
   Attachment, AuditEntry, BanEntry, Category, Channel, DesktopRelease, Emoji, Instance, Invite,
+  Relationship,
   InvitePreview, InstanceMeta, Me, Member, Message, NotificationMode,
   NotificationPreferences, PermissionDef, Role, Stats, VoiceState, Webhook,
 } from './types'
@@ -126,7 +127,9 @@ export const api = {
 
   channels: () => get<Channel[]>('/channels'),
   channelPermissions: () => get<Record<string, string>>('/channels/permissions'),
-  createChannel: (payload: Partial<Channel> & { name: string }) => post<Channel>('/channels', payload),
+  createChannel: (
+    payload: Partial<Channel> & { name: string; allowed_role_ids?: string[] },
+  ) => post<Channel>('/channels', payload),
   updateChannel: (id: string, payload: Record<string, unknown>) =>
     patch<Channel>(`/channels/${id}`, payload),
   deleteChannel: (id: string) => del<{ ok: boolean }>(`/channels/${id}`),
@@ -136,11 +139,31 @@ export const api = {
   setOverwrite: (id: string, role_id: string, allow: number, deny: number) =>
     put<{ ok: boolean }>(`/channels/${id}/overwrites`, { role_id, allow, deny }),
 
+  // ---- friends and favourites ----
+  relationships: () => get<Relationship[]>('/relationships'),
+  /** Sends a request, or accepts one already pointing at me. */
+  addFriend: (userId: string) => post<{ ok: boolean }>('/relationships', { user_id: userId }),
+  /** Withdraw, decline or unfriend — the server treats them as one thing. */
+  removeFriend: (userId: string) => del<{ ok: boolean }>(`/relationships/${userId}`),
+  blockUser: (userId: string) => post<{ ok: boolean }>('/relationships/block', { user_id: userId }),
+  unblockUser: (userId: string) => del<{ ok: boolean }>(`/relationships/block/${userId}`),
+  favourite: (userId: string) => put<{ ok: boolean }>(`/favourites/${userId}`),
+  unfavourite: (userId: string) => del<{ ok: boolean }>(`/favourites/${userId}`),
+
   categories: () => get<Category[]>('/categories'),
-  createCategory: (name: string) => post<Category>('/categories', { name }),
-  updateCategory: (id: string, name: string, position: number) =>
-    patch<Category>(`/categories/${id}`, { name, position }),
+  createCategory: (payload: {
+    name: string
+    position?: number
+    is_private?: boolean
+    allowed_role_ids?: string[]
+  }) => post<Category>('/categories', payload),
+  updateCategory: (
+    id: string,
+    payload: { name: string; position?: number; is_private?: boolean; allowed_role_ids?: string[] },
+  ) => patch<Category>(`/categories/${id}`, payload),
   deleteCategory: (id: string) => del<{ ok: boolean }>(`/categories/${id}`),
+  /** Which roles can see a channel or a category. Same endpoint for both. */
+  allowedRoles: (id: string) => get<{ role_ids: string[] }>(`/access/${id}/roles`),
 
   messages: (
     channelId: string,

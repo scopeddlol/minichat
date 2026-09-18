@@ -43,8 +43,11 @@ export default function TitleBar() {
   return (
     <div
       data-tauri-drag-region="deep"
-      className="fixed top-0 inset-x-0 z-[90] h-9 flex items-stretch select-none"
+      className="fixed top-0 inset-x-0 z-[90] flex items-stretch select-none"
       style={{
+        // Same variable index.css uses to make room, so the bar and the gap
+        // it sits in can never disagree.
+        height: 'var(--titlebar-h)',
         background: 'color-mix(in oklab, var(--surface-0) 82%, transparent)',
         backdropFilter: 'blur(14px)',
         borderBottom: '1px solid var(--border-soft)',

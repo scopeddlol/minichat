@@ -1,12 +1,14 @@
-import { ChevronDown, FolderPlus, Plus, Save, Settings2, Trash2 } from 'lucide-react'
+import { ChevronDown, FolderPlus, Lock, Plus, Save, Settings2, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../../lib/api'
 import { toBits } from '../../lib/perms'
 import { useStore } from '../../lib/store'
-import type { Channel, PermissionDef } from '../../lib/types'
+import CategoryDialog from '../CategoryDialog'
+import ChannelDialog from '../ChannelDialog'
+import type { Category, Channel, PermissionDef } from '../../lib/types'
 import Select from '../Select'
 import { ChannelIcon } from '../Sidebar'
-import { Field, Modal, Switch, toast, useConfirm } from '../ui'
+import { Field, Switch, toast, useConfirm } from '../ui'
 
 export default function Channels() {
   const channels = useStore((s) => s.channels)
@@ -15,6 +17,7 @@ export default function Channels() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [newCategory, setNewCategory] = useState('')
 
   const selected = channels.find((channel) => channel.id === selectedId) ?? null
@@ -25,7 +28,12 @@ export default function Channels() {
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="label !mb-0">Channels</span>
-            <button className="btn btn-ghost !p-1.5" onClick={() => setCreating(true)} title="Create channel">
+            <button
+              className="btn btn-ghost !p-1.5"
+              onClick={() => setCreating(true)}
+              title="Create channel"
+              aria-label="Create channel"
+            >
               <Plus size={15} />
             </button>
           </div>
@@ -64,12 +72,22 @@ export default function Channels() {
                     const name = event.target.value.trim()
                     if (!name || name === category.name) return
                     try {
-                      await api.updateCategory(category.id, name, category.position)
+                      await api.updateCategory(category.id, { name })
                     } catch {
                       toast.error('Could not rename the category.')
                     }
                   }}
                 />
+                {category.is_private && (
+                  <Lock size={11} className="shrink-0" style={{ color: 'var(--text-faint)' }} />
+                )}
+                <button
+                  className="btn btn-ghost !p-1 opacity-0 group-hover:opacity-100"
+                  onClick={() => setEditingCategory(category)}
+                  aria-label="Edit category"
+                >
+                  <Settings2 size={13} />
+                </button>
                 <button
                   className="btn btn-ghost !p-1 opacity-0 group-hover:opacity-100"
                   onClick={async () => {
@@ -97,7 +115,7 @@ export default function Channels() {
               onKeyDown={async (event) => {
                 if (event.key !== 'Enter' || !newCategory.trim()) return
                 try {
-                  await api.createCategory(newCategory.trim())
+                  await api.createCategory({ name: newCategory.trim() })
                   setNewCategory('')
                 } catch {
                   toast.error('Could not create the category.')
@@ -106,10 +124,11 @@ export default function Channels() {
             />
             <button
               className="btn btn-subtle !px-2 shrink-0"
+              aria-label="Create category"
               disabled={!newCategory.trim()}
               onClick={async () => {
                 try {
-                  await api.createCategory(newCategory.trim())
+                  await api.createCategory({ name: newCategory.trim() })
                   setNewCategory('')
                 } catch {
                   toast.error('Could not create the category.')
@@ -132,7 +151,12 @@ export default function Channels() {
         )}
       </div>
 
-      <CreateChannelModal open={creating} onClose={() => setCreating(false)} onCreated={setSelectedId} />
+      <ChannelDialog open={creating} onClose={() => setCreating(false)} />
+      <CategoryDialog
+        open={!!editingCategory}
+        category={editingCategory}
+        onClose={() => setEditingCategory(null)}
+      />
     </div>
   )
 }
@@ -382,122 +406,3 @@ export function ChannelEditor({ channel, onDeleted }: { channel: Channel; onDele
   )
 }
 
-export function CreateChannelModal({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean
-  onClose: () => void
-  onCreated?: (id: string) => void
-}) {
-  const categories = useStore((s) => s.categories)
-  const setActiveChannel = useStore((s) => s.setActiveChannel)
-  const [name, setName] = useState('')
-  const [kind, setKind] = useState<'text' | 'voice' | 'announcement'>('text')
-  const [categoryId, setCategoryId] = useState('')
-  const [isPrivate, setIsPrivate] = useState(false)
-  const [busy, setBusy] = useState(false)
-
-  const create = async () => {
-    if (!name.trim()) return
-    setBusy(true)
-    try {
-      const channel = await api.createChannel({
-        name: name.trim(),
-        kind,
-        category_id: categoryId || null,
-        is_private: isPrivate,
-      })
-      toast.success(`#${channel.name} created.`)
-      onCreated?.(channel.id)
-      if (!onCreated && channel.kind !== 'voice') setActiveChannel(channel.id)
-      setName('')
-      setIsPrivate(false)
-      onClose()
-    } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : 'Could not create the channel.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Create a channel"
-      description="Channels can be renamed or moved at any time."
-      width="sm"
-      footer={
-        <>
-          <button className="btn btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn btn-primary" onClick={create} disabled={busy || !name.trim()}>
-            {busy ? 'Creating…' : 'Create channel'}
-          </button>
-        </>
-      }
-    >
-      <div className="px-5 py-4 space-y-4">
-        <div>
-          <span className="label">Type</span>
-          <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                ['text', 'Text'],
-                ['voice', 'Voice'],
-                ['announcement', 'Announce'],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setKind(value)}
-                className="flex flex-col items-center gap-1.5 py-3 rounded-xl border text-xs font-medium transition-colors"
-                style={{
-                  borderColor: kind === value ? 'var(--accent)' : 'var(--border)',
-                  background: kind === value ? 'var(--accent-soft)' : 'transparent',
-                  color: kind === value ? 'var(--accent)' : 'var(--text-muted)',
-                }}
-              >
-                <ChannelIcon kind={value} size={17} />
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <Field label="Name" hint={kind === 'voice' ? undefined : 'Spaces become dashes.'}>
-          <input
-            className="input"
-            value={name}
-            autoFocus
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void create()}
-            placeholder={kind === 'voice' ? 'Lounge' : 'new-channel'}
-          />
-        </Field>
-
-        <Field label="Category">
-          <Select
-            value={categoryId}
-            onChange={setCategoryId}
-            ariaLabel="Category"
-            options={[
-              { value: '', label: 'Uncategorised' },
-              ...categories.map((category) => ({ value: category.id, label: category.name })),
-            ]}
-          />
-        </Field>
-
-        <Switch
-          checked={isPrivate}
-          onChange={setIsPrivate}
-          label="Private channel"
-          hint="Hidden from the default role until you grant access."
-        />
-      </div>
-    </Modal>
-  )
-}

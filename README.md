@@ -25,10 +25,13 @@ the people you want and that's who's there.
 | **Custom emoji** | Upload your own, use them as `:name:` or as reactions |
 | **Voice & video** | LiveKit rooms per channel — camera, screen share, device pickers, per-member volume, push-to-talk, speaking indicators |
 | **Announcements** | Read-only channels where only the people you allow can post |
-| **Roles** | 23 permission flags, rank-based hierarchy, per-channel overrides |
+| **Roles** | 24 permission flags, rank-based hierarchy, per-channel overrides |
+| **Private channels** | Pick exactly which roles get in, or let a private category decide for everything inside it |
+| **Right-click** | Menus on messages (reply, forward, copy link, pin) and on the channel list (create, edit, delete) — long-press on touch |
 | **Invites** | Link-based signup with expiry, use limits and optional auto-granted roles |
 | **Admin panel** | Stats, branding, channels, roles, members, bans, invites, webhooks, live audit log |
-| **Profiles** | Avatar, banner, bio, pronouns, favourite game, status, personal accent colour |
+| **Profiles** | Avatar and banner you can drag and zoom to frame, bio, pronouns, favourite game, status, personal accent colour |
+| **Friends** | Friend requests, private favourites, and blocking |
 | **Apps** | Installable PWA (iOS, Android, desktop) and a native Windows build |
 
 Built with **Rust** (axum + SQLite) on the server and **TypeScript** (React +
@@ -212,6 +215,43 @@ a page can't replace it. Quality and frame rate are chosen in MiniChat's own
 dialog first (see **Screen sharing** below); the picker only chooses *what* to
 share.
 
+### Channels, categories and who can see them
+
+Channel names are free-form: spaces, capitals and punctuation all survive, so
+"Game Night" stays "Game Night". Channels are referenced by id everywhere, so
+renaming one never breaks a link.
+
+Right-click anywhere in the channel list:
+
+| Right-click on | You get |
+|---|---|
+| a channel | Copy link, Edit, Create channel here, Delete |
+| a category heading | Create channel here, Edit, Delete |
+| empty space | Create channel, Create category |
+
+A **private channel** names the roles that can see it. A **private category**
+does the same for everything inside it: channels created in one start with
+*Use the category's permissions* switched on, so "staff only" is set once
+rather than remembered every time someone adds a channel. Turn that switch off
+for a channel and it keeps its own permissions and ignores the category from
+then on — including if the category's roles change later.
+
+Under the hood a synced channel holds a *copy* of the category's overwrites
+rather than resolving through it on every read. Channel visibility is answered
+in four different places on the server, and keeping inheritance out of all four
+means they cannot disagree about who can see what. The cost is a fan-out when a
+category changes, which emits `CHANNEL_UPDATE` so a member who just lost access
+stops seeing the channel without reloading.
+
+### Friends and favourites
+
+A friend request needs the other person to accept it. A **favourite** does not:
+it is a private bookmark, the other member is never told, and it survives
+unfriending. Both push their owner to the top of the member list.
+
+Blocking ends any friendship and stops further requests in both directions.
+Unfriending someone you have blocked does not lift the block.
+
 ### Screen sharing
 
 Starting a share opens MiniChat's own dialog first: **resolution** (480p, 720p,
@@ -341,7 +381,7 @@ git tag v0.4.0
 git push origin v0.4.0
 ```
 
-That publishes the image as `ghcr.io/scopeddlol/minichat:v0.4.0` (and `:0.3`)
+That publishes the image as `ghcr.io/scopeddlol/minichat:v0.4.0` (and `:0.4`)
 and opens a **draft** GitHub release with the Windows installers attached, for
 you to review before making it public.
 

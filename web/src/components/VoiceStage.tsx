@@ -42,6 +42,7 @@ export default function VoiceStage() {
               tracks[`${focused.identity}:${Track.Source.Camera}`]
             }
             member={members[focused.identity]}
+            frame={members[focused.identity]?.avatar_frame}
             large
             canModerate={!isDirect && can(permissions, P.MOVE_MEMBERS)}
           />
@@ -70,6 +71,7 @@ export default function VoiceStage() {
               participant={participant}
               track={tracks[`${participant.identity}:${Track.Source.Camera}`]}
               member={members[participant.identity]}
+              frame={members[participant.identity]?.avatar_frame}
               compact={Boolean(focused)}
               onFocus={() => setFocus(participant.identity)}
               canModerate={!isDirect && can(permissions, P.MOVE_MEMBERS)}
@@ -84,6 +86,7 @@ function Tile({
   participant,
   track,
   member,
+  frame,
   large,
   compact,
   onFocus,
@@ -92,6 +95,8 @@ function Tile({
   participant: VoiceParticipant
   track?: TrackType
   member?: { display_name: string; avatar_url: string | null; accent_color: string; id: string }
+  /** Passed separately so the trimmed `member` shape above stays trimmed. */
+  frame?: import('../lib/types').ImageFrame | null
   large?: boolean
   compact?: boolean
   onFocus?: () => void
@@ -139,6 +144,7 @@ function Tile({
           id={member?.id ?? participant.identity}
           name={name}
           src={member?.avatar_url}
+          frame={frame}
           accent={member?.accent_color}
           size={large ? 'xxl' : compact ? 'md' : 'xl'}
           ring={participant.speaking && !participant.muted}

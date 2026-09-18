@@ -2,7 +2,7 @@ import {
   Hash, Menu, Pin, Search, Users, WifiOff, X, Download,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import ContextMenu from '../components/ContextMenu'
+import MemberActions from '../components/MemberActions'
 import DirectMessages from '../components/DirectMessages'
 import DirectCallOverlay from '../components/DirectCallOverlay'
 import { useInbox } from '../lib/direct'
@@ -15,7 +15,9 @@ import SettingsModal from '../components/SettingsModal'
 import ScreenShareDialog from '../components/ScreenShareDialog'
 import Sidebar, { ChannelIcon } from '../components/Sidebar'
 import VoiceStage from '../components/VoiceStage'
-import { CreateChannelModal } from '../components/admin/Channels'
+import CategoryDialog from '../components/CategoryDialog'
+import ChannelDialog from '../components/ChannelDialog'
+import ForwardDialog from '../components/ForwardDialog'
 import { CreateInviteModal } from '../components/admin/Invites'
 import { Modal, Spinner, EmptyState } from '../components/ui'
 import { api } from '../lib/api'
@@ -24,7 +26,7 @@ import { gateway } from '../lib/gateway'
 import { attachHotkeys, loadBindings } from '../lib/hotkeys'
 import { can, P } from '../lib/perms'
 import { pruneTyping, useStore } from '../lib/store'
-import type { Attachment, Message } from '../lib/types'
+import type { Attachment, Category, Channel, Message } from '../lib/types'
 import { useVoice } from '../lib/voice'
 
 export default function Chat() {
@@ -44,13 +46,21 @@ export default function Chat() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const [invitesOpen, setInvitesOpen] = useState(false)
-  const [createChannelOpen, setCreateChannelOpen] = useState(false)
+  // One dialog each, driven by what the sidebar's menus ask for. `channel`
+  // and `category` null means "create"; set means "edit".
+  const [channelDialog, setChannelDialog] = useState<
+    { open: boolean; channel: Channel | null; categoryId: string | null }
+  >({ open: false, channel: null, categoryId: null })
+  const [categoryDialog, setCategoryDialog] = useState<{ open: boolean; category: Category | null }>(
+    { open: false, category: null },
+  )
   const [profileId, setProfileId] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [pinsOpen, setPinsOpen] = useState(false)
   const [lightbox, setLightbox] = useState<Attachment | null>(null)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [screenShareOpen, setScreenShareOpen] = useState(false)
+  const [forwarding, setForwarding] = useState<Message | null>(null)
 
   const channel = channels.find((c) => c.id === activeChannelId) ?? null
   const perms = channel ? (channelPermissions[channel.id] ?? permissions) : permissions
@@ -100,15 +110,39 @@ export default function Chat() {
     return () => navigator.serviceWorker?.removeEventListener('message', onMessage)
   }, [])
 
-  // A notification that opened a fresh window carries the channel in the URL.
+  /**
+   * A deep link: a notification that opened a fresh window carries the
+   * channel, and a copied message link carries the message too.
+   *
+   * Read on the first render and cleared from the URL immediately, but acted
+   * on only once the channel list exists. `phase` becomes 'ready' from the
+   * HTTP boot, while channels arrive later with the gateway's READY frame —
+   * so Chat mounts with none, and doing this in a mount effect silently did
+   * nothing at all.
+   */
+  const [deepLink] = useState(() => {
+    const params = new URLSearchParams(location.search)
+    const channel = params.get('channel')
+    const message = params.get('message')
+    if (channel) window.history.replaceState({}, '', '/')
+    return channel ? { channel, message } : null
+  })
+  const [deepLinkDone, setDeepLinkDone] = useState(false)
+
   useEffect(() => {
-    const target = new URLSearchParams(location.search).get('channel')
-    if (!target) return
-    window.history.replaceState({}, '', '/')
-    if (useStore.getState().channels.some((channel) => channel.id === target)) {
-      useStore.getState().setActiveChannel(target)
+    if (!deepLink || deepLinkDone) return
+    // Still waiting on the channel list, or the channel isn't one we can see.
+    // Re-checked whenever it changes, so a channel granted mid-session works.
+    if (!channels.some((entry) => entry.id === deepLink.channel)) return
+    setDeepLinkDone(true)
+    if (deepLink.message) {
+      // Loads the surrounding page and flashes it, rather than dropping the
+      // reader at the bottom of the channel and leaving them to scroll.
+      void useStore.getState().jumpToMessage(deepLink.channel, deepLink.message)
+    } else {
+      useStore.getState().setActiveChannel(deepLink.channel)
     }
-  }, [])
+  }, [deepLink, deepLinkDone, channels])
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -157,7 +191,12 @@ export default function Chat() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenAdmin={() => setAdminOpen(true)}
           onOpenInvites={() => setInvitesOpen(true)}
-          onCreateChannel={() => setCreateChannelOpen(true)}
+          onCreateChannel={(categoryId) =>
+            setChannelDialog({ open: true, channel: null, categoryId: categoryId ?? null })
+          }
+          onEditChannel={(channel) => setChannelDialog({ open: true, channel, categoryId: null })}
+          onCreateCategory={() => setCategoryDialog({ open: true, category: null })}
+          onEditCategory={(category) => setCategoryDialog({ open: true, category })}
           onOpenProfile={openProfile}
         />
       </aside>
@@ -190,9 +229,21 @@ export default function Chat() {
                 setSidebarOpen(false)
                 setInvitesOpen(true)
               }}
-              onCreateChannel={() => {
+              onCreateChannel={(categoryId) => {
                 setSidebarOpen(false)
-                setCreateChannelOpen(true)
+                setChannelDialog({ open: true, channel: null, categoryId: categoryId ?? null })
+              }}
+              onEditChannel={(channel) => {
+                setSidebarOpen(false)
+                setChannelDialog({ open: true, channel, categoryId: null })
+              }}
+              onCreateCategory={() => {
+                setSidebarOpen(false)
+                setCategoryDialog({ open: true, category: null })
+              }}
+              onEditCategory={(category) => {
+                setSidebarOpen(false)
+                setCategoryDialog({ open: true, category })
               }}
               onOpenProfile={openProfile}
               onNavigate={() => setSidebarOpen(false)}
@@ -276,6 +327,7 @@ export default function Chat() {
                 channel={channel}
                 channelPermissions={perms}
                 onReply={setReplyTo}
+                onForward={setForwarding}
                 onOpenProfile={openProfile}
                 onOpenImage={setLightbox}
               />
@@ -299,7 +351,10 @@ export default function Chat() {
               }
               action={
                 can(permissions, P.MANAGE_CHANNELS) ? (
-                  <button className="btn btn-primary" onClick={() => setCreateChannelOpen(true)}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => setChannelDialog({ open: true, channel: null, categoryId: null })}
+                  >
                     Create a channel
                   </button>
                 ) : undefined
@@ -334,12 +389,27 @@ export default function Chat() {
       )}
 
       {/* Overlays */}
-      <ContextMenu onProfile={openProfile} onCreate={() => setCreateChannelOpen(true)} />
+      <MemberActions onProfile={openProfile} />
       <DirectCallOverlay onShare={() => setScreenShareOpen(true)} />
       <ScreenShareDialog open={screenShareOpen} onClose={() => setScreenShareOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} onOpenProfile={openProfile} />
-      <CreateChannelModal open={createChannelOpen} onClose={() => setCreateChannelOpen(false)} />
+      <ForwardDialog
+        open={!!forwarding}
+        message={forwarding}
+        onClose={() => setForwarding(null)}
+      />
+      <ChannelDialog
+        open={channelDialog.open}
+        channel={channelDialog.channel}
+        defaultCategoryId={channelDialog.categoryId}
+        onClose={() => setChannelDialog((value) => ({ ...value, open: false }))}
+      />
+      <CategoryDialog
+        open={categoryDialog.open}
+        category={categoryDialog.category}
+        onClose={() => setCategoryDialog((value) => ({ ...value, open: false }))}
+      />
       <CreateInviteModal
         open={invitesOpen}
         onClose={() => setInvitesOpen(false)}

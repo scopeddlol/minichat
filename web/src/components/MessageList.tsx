@@ -10,6 +10,7 @@ interface Props {
   channel: Channel
   channelPermissions: bigint
   onReply: (message: Message) => void
+  onForward: (message: Message) => void
   onOpenProfile: (userId: string) => void
   onOpenImage: (attachment: Attachment) => void
 }
@@ -18,6 +19,7 @@ export default function MessageList({
   channel,
   channelPermissions,
   onReply,
+  onForward,
   onOpenProfile,
   onOpenImage,
 }: Props) {
@@ -192,6 +194,7 @@ export default function MessageList({
                 grouped={!showDivider && !showUnread && shouldGroup(previous, message)}
                 channelPermissions={channelPermissions}
                 onReply={onReply}
+                onForward={onForward}
                 onOpenProfile={onOpenProfile}
                 onOpenImage={onOpenImage}
                 highlight={flashId === message.id}

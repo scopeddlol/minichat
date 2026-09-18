@@ -1,18 +1,19 @@
 import {
-  Bell, Download, Headphones, Image as ImageIcon, Info, KeyRound, LogOut, Monitor, Moon,
+  Bell, Download, Headphones, Image as ImageIcon, Info, KeyRound, LogOut, Monitor, Moon, Move,
   Palette, Smartphone, Sparkles, Sun, User, X,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, ApiError, setToken } from '../lib/api'
 import { formatBytes } from '../lib/format'
 import { isDesktopApp } from '../lib/desktop'
-import type { DesktopRelease } from '../lib/types'
+import type { DesktopRelease, ImageFrame } from '../lib/types'
 import { useStore } from '../lib/store'
 import { clearThemeOverride, setTheme, storedTheme, type ThemeChoice } from '../lib/theme'
+import ImageFramer, { CENTRED } from './ImageFramer'
 import Select from './Select'
 import NotificationSettings from './settings/NotificationSettings'
 import VoiceSettings from './settings/VoiceSettings'
-import { Avatar, ColorField, Field, Modal, Switch, toast, useConfirm } from './ui'
+import { Avatar, ColorField, Field, frameStyle, Modal, Switch, toast, useConfirm } from './ui'
 
 type Tab = 'profile' | 'notifications' | 'voice' | 'appearance' | 'account' | 'about'
 
@@ -34,6 +35,11 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
   const [accent, setAccent] = useState('#5b6ee8')
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [bannerUrl, setBannerUrl] = useState<string | null>(null)
+  const [avatarFrame, setAvatarFrame] = useState<ImageFrame>(CENTRED)
+  const [bannerFrame, setBannerFrame] = useState<ImageFrame>(CENTRED)
+  // Framing is only shown while you're adjusting it; the rest of the time the
+  // profile section stays a short form rather than two crop editors.
+  const [framing, setFraming] = useState<'avatar' | 'banner' | null>(null)
   const [email, setEmail] = useState('')
 
   const [theme, setThemeState] = useState<ThemeChoice | null>(storedTheme)
@@ -52,6 +58,9 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
     setAccent(me.accent_color)
     setAvatarUrl(me.avatar_url)
     setBannerUrl(me.banner_url)
+    setAvatarFrame(me.avatar_frame ?? CENTRED)
+    setBannerFrame(me.banner_frame ?? CENTRED)
+    setFraming(null)
     setEmail(me.email ?? '')
   }, [open, me])
 
@@ -69,6 +78,8 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
         accent_color: accent,
         avatar_url: avatarUrl ?? '',
         banner_url: bannerUrl ?? '',
+        avatar_frame: avatarFrame,
+        banner_frame: bannerFrame,
       })
       patchMe(updated)
       toast.success('Profile saved.')
@@ -79,10 +90,17 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
     }
   }
 
-  const uploadImage = async (file: File, set: (url: string) => void) => {
+  const uploadImage = async (
+    file: File,
+    set: (url: string) => void,
+    resetFrame?: (frame: ImageFrame) => void,
+  ) => {
     try {
       const attachment = await api.upload(file)
       set(attachment.url)
+      // A new picture starts centred: a crop chosen for the old one is
+      // meaningless here, and the server resets it the same way.
+      resetFrame?.({ ...CENTRED })
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : 'Upload failed.')
     }
@@ -114,7 +132,11 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
 
   return (
     <Modal open={open} onClose={onClose} width="lg" bare>
-      <div className="flex flex-col sm:flex-row min-h-[520px]">
+      {/* A fixed height, not a minimum. With `min-h` the dialog grew to fit
+          whichever tab was open — Profile is tall, Appearance is short — so it
+          jumped on every tab change. The content pane scrolls inside instead,
+          which is what the admin panel already did. */}
+      <div className="flex flex-col sm:flex-row" style={{ height: 'min(84vh, 640px)' }}>
         {/* Phones get a picker and a close button that stays put, rather than
             a scroller with the X hidden past the right edge. */}
         <header
@@ -133,7 +155,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
         </header>
 
         <nav
-          className="hidden sm:w-48 shrink-0 p-3 sm:border-r sm:flex sm:flex-col gap-1"
+          className="hidden sm:w-48 shrink-0 p-3 sm:border-r sm:flex sm:flex-col gap-1 overflow-y-auto scroll-thin"
           style={{ background: 'var(--surface-0)' }}
         >
           <div className="flex items-center justify-between mb-2 px-1">
@@ -164,62 +186,130 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
             <div className="space-y-5 animate-fade-in">
               <h2 className="text-lg font-semibold">Your profile</h2>
 
-              <div
-                className="rounded-xl overflow-hidden border relative"
-                style={{
-                  height: 92,
-                  background: bannerUrl
-                    ? `url(${bannerUrl}) center/cover`
-                    : `linear-gradient(135deg, ${accent}, color-mix(in oklab, ${accent} 35%, var(--surface-3)))`,
-                }}
-              >
-                <label className="absolute top-2 right-2 btn btn-subtle !py-1 !px-2 !text-xs cursor-pointer">
-                  <ImageIcon size={12} /> Banner
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0]
-                      if (file) void uploadImage(file, setBannerUrl)
-                    }}
+              {framing === 'banner' && bannerUrl ? (
+                <div className="card p-4 space-y-3">
+                  <p className="label !mb-0">Position your banner</p>
+                  <ImageFramer
+                    src={bannerUrl}
+                    frame={bannerFrame}
+                    onChange={setBannerFrame}
+                    shape="banner"
+                    aspect={4}
                   />
-                </label>
-                {bannerUrl && (
-                  <button
-                    className="absolute top-2 right-20 btn btn-subtle !py-1 !px-1.5"
-                    onClick={() => setBannerUrl(null)}
-                    aria-label="Remove banner"
-                  >
-                    <X size={12} />
+                  <button className="btn btn-subtle w-full" onClick={() => setFraming(null)}>
+                    Done
                   </button>
-                )}
-              </div>
-
-              <div className="flex items-center gap-4 -mt-8 px-3">
-                <div style={{ boxShadow: '0 0 0 4px var(--surface-1)', borderRadius: '50%' }}>
-                  <Avatar id={me.id} name={displayName || me.username} src={avatarUrl} accent={accent} size="xl" />
                 </div>
-                <div className="flex gap-2 mt-6">
-                  <label className="btn btn-subtle cursor-pointer">
-                    <ImageIcon size={14} /> Change avatar
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0]
-                        if (file) void uploadImage(file, setAvatarUrl)
-                      }}
+              ) : (
+                <div
+                  className="rounded-xl overflow-hidden border relative"
+                  style={{
+                    height: 92,
+                    background: bannerUrl
+                      ? undefined
+                      : `linear-gradient(135deg, ${accent}, color-mix(in oklab, ${accent} 35%, var(--surface-3)))`,
+                  }}
+                >
+                  {bannerUrl && (
+                    <img
+                      src={bannerUrl}
+                      alt=""
+                      className="absolute inset-0 w-full h-full object-cover"
+                      style={frameStyle(bannerFrame)}
                     />
-                  </label>
-                  {avatarUrl && (
-                    <button className="btn btn-ghost" onClick={() => setAvatarUrl(null)}>
-                      Remove
-                    </button>
                   )}
+                  {/* A flex row, not absolute offsets: the buttons were
+                      touching at right-2 / right-[5.5rem], and any label
+                      change would have moved them again. */}
+                  <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                    {bannerUrl && (
+                      <button
+                        className="btn btn-subtle !py-1 !px-2 !text-xs"
+                        onClick={() => setFraming('banner')}
+                      >
+                        <Move size={12} /> Position
+                      </button>
+                    )}
+                    <label className="btn btn-subtle !py-1 !px-2 !text-xs cursor-pointer">
+                      <ImageIcon size={12} /> Banner
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0]
+                          if (file) void uploadImage(file, setBannerUrl, setBannerFrame)
+                        }}
+                      />
+                    </label>
+                    {bannerUrl && (
+                      <button
+                        className="btn btn-subtle !py-1 !px-1.5"
+                        onClick={() => {
+                          setBannerUrl(null)
+                          setBannerFrame(CENTRED)
+                        }}
+                        aria-label="Remove banner"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {framing === 'avatar' && avatarUrl ? (
+                <div className="card p-4 space-y-3">
+                  <p className="label !mb-0">Position your avatar</p>
+                  <ImageFramer src={avatarUrl} frame={avatarFrame} onChange={setAvatarFrame} />
+                  <button className="btn btn-subtle w-full" onClick={() => setFraming(null)}>
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-4 -mt-8 px-3">
+                  <div style={{ boxShadow: '0 0 0 4px var(--surface-1)', borderRadius: '50%' }}>
+                    <Avatar
+                      id={me.id}
+                      name={displayName || me.username}
+                      src={avatarUrl}
+                      accent={accent}
+                      size="xl"
+                      frame={avatarFrame}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-6">
+                    <label className="btn btn-subtle cursor-pointer">
+                      <ImageIcon size={14} /> Change avatar
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0]
+                          if (file) void uploadImage(file, setAvatarUrl, setAvatarFrame)
+                        }}
+                      />
+                    </label>
+                    {avatarUrl && (
+                      <>
+                        <button className="btn btn-subtle" onClick={() => setFraming('avatar')}>
+                          <Move size={14} /> Position
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() => {
+                            setAvatarUrl(null)
+                            setAvatarFrame(CENTRED)
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="grid sm:grid-cols-2 gap-4">
                 <Field label="Display name">

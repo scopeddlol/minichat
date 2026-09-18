@@ -545,6 +545,10 @@ function publishVoiceState(channelId: string, state: Partial<VoiceStore>) {
 
 /** Disconnect when a moderator drops us from voice. */
 gateway.on((event) => {
+  if (event.t === 'ACCESS_UPDATE') {
+    const channel = useVoice.getState().channelId
+    if (channel && !channel.startsWith('direct:') && !event.d.channels.some((c: { id: string }) => c.id === channel)) void useVoice.getState().leave()
+  }
   if (event.t === 'VOICE_FORCE_DISCONNECT') void useVoice.getState().leave()
   if (event.t === 'CHANNEL_DELETE' && useVoice.getState().channelId === event.d.id) {
     void useVoice.getState().leave()

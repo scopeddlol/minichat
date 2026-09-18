@@ -29,6 +29,8 @@ jobs:
       - name: Build
         working-directory: server
         run: cargo build --release --locked
+      - name: Release integration smoke test
+        run: python3 server/tests/release_smoke.py server/target/release/minichat-server
 
   # Runs on Windows because that is the only target that ships, and because the
   # parts most likely to break — the WebView2 permission hook and the tray —

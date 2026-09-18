@@ -287,6 +287,30 @@ fn emit(state: &AppState, members: &(String, String), kind: &str, data: Value) {
     state.emit_user(&members.1, kind, data);
 }
 
+async fn require_contact(state: &AppState, members: &(String, String)) -> AppResult<()> {
+    let unavailable: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM relationships
+        WHERE kind = 'blocked' AND ((user_id = ? AND other_id = ?) OR (user_id = ? AND other_id = ?)))
+        OR EXISTS(SELECT 1 FROM users WHERE id IN (?, ?) AND is_suspended = 1)")
+        .bind(&members.0).bind(&members.1).bind(&members.1).bind(&members.0)
+        .bind(&members.0).bind(&members.1).fetch_one(&state.db).await?;
+    if unavailable {
+        return Err(AppError::forbidden(
+            "This member is unavailable for messages and calls.",
+        ));
+    }
+    Ok(())
+}
+
+pub async fn end_between(state: &AppState, a: &str, b: &str) -> AppResult<()> {
+    let calls: Vec<Call> = sqlx::query_as("UPDATE direct_calls SET status = 'ended' WHERE status != 'ended'
+        AND conversation_id IN (SELECT id FROM conversations WHERE (user_a = ? AND user_b = ?) OR (user_a = ? AND user_b = ?)) RETURNING *")
+        .bind(a).bind(b).bind(b).bind(a).fetch_all(&state.db).await?;
+    for call in calls {
+        emit(state, &(a.into(), b.into()), "DIRECT_CALL", json!(call));
+    }
+    Ok(())
+}
+
 #[derive(Serialize, sqlx::FromRow)]
 pub struct Conversation {
     id: String,
@@ -327,6 +351,7 @@ pub async fn open(
     } else {
         (peer.as_str(), auth.id())
     };
+    require_contact(&state, &(a.into(), b.into())).await?;
     sqlx::query("INSERT INTO conversations(id,user_a,user_b) VALUES(?,?,?) ON CONFLICT(user_a,user_b) DO NOTHING")
         .bind(ids::new_id()).bind(a).bind(b).execute(&state.db).await?;
     let id: String =
@@ -374,6 +399,7 @@ pub async fn send(
     Json(input): Json<Send>,
 ) -> AppResult<Json<Value>> {
     let members = participants(&state, auth.id(), &id).await?;
+    require_contact(&state, &members).await?;
     let content = validate::text(&input.content, "Message", 1, 4000)?;
     let message_id = ids::new_id();
     sqlx::query(
@@ -434,6 +460,7 @@ pub async fn call(
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     let members = participants(&state, auth.id(), &id).await?;
+    require_contact(&state, &members).await?;
     if !state.config.livekit_ready() {
         return Err(AppError::bad("Calls are not configured on this instance."));
     }
@@ -502,6 +529,9 @@ pub async fn action(
         .await?
         .ok_or_else(|| AppError::not_found("Call not found."))?;
     let members = participants(&state, auth.id(), &call.conversation_id).await?;
+    if input.action == "accept" {
+        require_contact(&state, &members).await?;
+    }
     let status = match input.action.as_str() {
         "accept" if call.caller_id != auth.id() && call.status == "ringing" => "accepted",
         "end" => "ended",
@@ -532,7 +562,8 @@ pub async fn token(
             .fetch_optional(&state.db)
             .await?
             .ok_or_else(|| AppError::not_found("Active call not found."))?;
-    participants(&state, auth.id(), &call.conversation_id).await?;
+    let members = participants(&state, auth.id(), &call.conversation_id).await?;
+    require_contact(&state, &members).await?;
     let room = format!("direct-{id}");
     let token = mint_token(
         &state.config.livekit_api_key,
