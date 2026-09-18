@@ -116,6 +116,8 @@ pub struct Category {
     pub id: String,
     pub name: String,
     pub position: i64,
+    /// Hides the category and every channel synced to it.
+    pub is_private: bool,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -132,6 +134,8 @@ pub struct Channel {
     pub created_at: String,
     pub emoji: String,
     pub description: String,
+    /// Whether this channel's permissions are a copy of its category's.
+    pub sync_category: bool,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]

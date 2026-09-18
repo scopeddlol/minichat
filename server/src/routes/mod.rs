@@ -54,6 +54,9 @@ pub fn api_router() -> Router<AppState> {
             "/channels/{id}/overwrites",
             get(channels::list_overwrites).put(channels::set_overwrite),
         )
+        // Works for a channel id or a category id: both answer "which roles
+        // can see this".
+        .route("/access/{id}/roles", get(channels::allowed_roles))
         .route(
             "/categories",
             get(channels::list_categories).post(channels::create_category),
