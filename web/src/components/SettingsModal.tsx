@@ -114,7 +114,11 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
 
   return (
     <Modal open={open} onClose={onClose} width="lg" bare>
-      <div className="flex flex-col sm:flex-row min-h-[520px]">
+      {/* A fixed height, not a minimum. With `min-h` the dialog grew to fit
+          whichever tab was open — Profile is tall, Appearance is short — so it
+          jumped on every tab change. The content pane scrolls inside instead,
+          which is what the admin panel already did. */}
+      <div className="flex flex-col sm:flex-row" style={{ height: 'min(84vh, 640px)' }}>
         {/* Phones get a picker and a close button that stays put, rather than
             a scroller with the X hidden past the right edge. */}
         <header
@@ -133,7 +137,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
         </header>
 
         <nav
-          className="hidden sm:w-48 shrink-0 p-3 sm:border-r sm:flex sm:flex-col gap-1"
+          className="hidden sm:w-48 shrink-0 p-3 sm:border-r sm:flex sm:flex-col gap-1 overflow-y-auto scroll-thin"
           style={{ background: 'var(--surface-0)' }}
         >
           <div className="flex items-center justify-between mb-2 px-1">
