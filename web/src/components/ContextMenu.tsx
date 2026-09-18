@@ -85,6 +85,16 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => !item.separator && !item.disabled)
 
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    ref.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    return () => { if (previous?.isConnected) previous.focus() }
+  }, [])
+
+  useEffect(() => {
+    if (active >= 0) ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[state.items.slice(0, active).filter(item => !item.separator).length]?.focus()
+  }, [active, state.items])
+
   // Measured, then placed: the menu's height depends on its items, and
   // guessing it puts the last item under the taskbar often enough to matter.
   useLayoutEffect(() => {
@@ -100,7 +110,8 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' || event.key === 'Tab') {
+        event.preventDefault()
         event.stopPropagation()
         onClose()
         return
@@ -127,7 +138,9 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
     document.addEventListener('keydown', onKey, true)
     // Any scroll or resize invalidates the anchor point entirely; a menu is
     // short-lived, so closing beats trying to follow.
-    const onMove = () => onClose()
+    const onMove = (event: Event) => {
+      if (!(event.target instanceof Node) || !ref.current?.contains(event.target)) onClose()
+    }
     window.addEventListener('scroll', onMove, true)
     window.addEventListener('resize', onMove)
     window.addEventListener('blur', onMove)
@@ -148,6 +161,7 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
         type="button"
         role="menuitem"
         disabled={item.disabled}
+        onFocus={() => setActive(index)}
         onMouseEnter={() => setActive(index)}
         onClick={() => {
           onClose()
@@ -202,8 +216,8 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
         aria-orientation="vertical"
         className={
           sheet
-            ? 'fixed z-[85] card p-1.5 left-2 right-2 bottom-2 animate-pop-in'
-            : 'fixed z-[85] card p-1.5 animate-pop-in'
+            ? 'fixed z-[85] card p-1.5 left-2 right-2 bottom-2 animate-pop-in max-h-[calc(100dvh-16px)] overflow-y-auto'
+            : 'fixed z-[85] card p-1.5 animate-pop-in max-h-[calc(100dvh-16px)] overflow-y-auto'
         }
         style={
           sheet

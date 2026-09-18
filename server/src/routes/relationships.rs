@@ -216,11 +216,13 @@ pub async fn block(
 
     let mut tx = state.db.begin().await?;
     // Their side of the friendship goes; mine becomes the block.
-    sqlx::query("DELETE FROM relationships WHERE user_id = ? AND other_id = ?")
-        .bind(&other.id)
-        .bind(auth.id())
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM relationships WHERE user_id = ? AND other_id = ? AND kind != 'blocked'",
+    )
+    .bind(&other.id)
+    .bind(auth.id())
+    .execute(&mut *tx)
+    .await?;
     sqlx::query(
         "INSERT INTO relationships (user_id, other_id, kind) VALUES (?, ?, 'blocked')
          ON CONFLICT(user_id, other_id) DO UPDATE SET kind = 'blocked'",
@@ -231,6 +233,7 @@ pub async fn block(
     .await?;
     tx.commit().await?;
 
+    crate::routes::direct::end_between(&state, auth.id(), &other.id).await?;
     notify(&state, auth.id(), &other.id);
     Ok(Json(json!({ "ok": true })))
 }

@@ -15,10 +15,7 @@ pub async fn build(state: &AppState, auth: &Auth) -> AppResult<Value> {
     let roles: Vec<Role> = sqlx::query_as("SELECT * FROM roles ORDER BY position DESC, name")
         .fetch_all(&state.db)
         .await?;
-    let categories: Vec<Category> =
-        sqlx::query_as("SELECT * FROM categories ORDER BY position, name")
-            .fetch_all(&state.db)
-            .await?;
+    let categories = access::visible_categories(state, auth).await?;
 
     let is_admin = perms::has(auth.permissions, perms::ADMINISTRATOR);
     let visible = access::visible_channel_ids(state, &auth.role_ids, is_admin).await?;
@@ -59,7 +56,12 @@ pub async fn build(state: &AppState, auth: &Auth) -> AppResult<Value> {
         unread.insert(channel.id.clone(), json!(count));
     }
 
-    let voice_states = state.voice_states().await;
+    let voice_states: Vec<_> = state
+        .voice_states()
+        .await
+        .into_iter()
+        .filter(|voice| visible.contains(&voice.channel_id))
+        .collect();
 
     // Mentions get their own counter: a channel with 40 unread messages and
     // one mention should read very differently from one with 40 and none.

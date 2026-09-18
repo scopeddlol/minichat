@@ -2,6 +2,10 @@ import {
   Hash, Menu, Pin, Search, Users, WifiOff, X, Download,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import MemberActions from '../components/MemberActions'
+import DirectMessages from '../components/DirectMessages'
+import DirectCallOverlay from '../components/DirectCallOverlay'
+import { useInbox } from '../lib/direct'
 import AdminPanel from '../components/AdminPanel'
 import Composer from '../components/Composer'
 import MemberList from '../components/MemberList'
@@ -26,6 +30,7 @@ import type { Attachment, Category, Channel, Message } from '../lib/types'
 import { useVoice } from '../lib/voice'
 
 export default function Chat() {
+  const inboxOpen = useInbox(s => s.open)
   const me = useStore((s) => s.me)
   const channels = useStore((s) => s.channels)
   const activeChannelId = useStore((s) => s.activeChannelId)
@@ -168,7 +173,7 @@ export default function Chat() {
   const showVoiceStage = voiceConnected && voiceChannelId === activeChannelId
 
   return (
-    <div className="h-full flex overflow-hidden" style={{ background: 'var(--bg)' }}>
+    <div className="chat-shell h-full min-h-0 flex overflow-hidden" style={{ background: 'var(--bg)' }}>
       {connection !== 'ready' && (
         <div
           className="fixed top-0 inset-x-0 z-50 text-center text-xs py-1.5 font-medium safe-top animate-fade-in"
@@ -180,7 +185,7 @@ export default function Chat() {
       )}
 
       {/* Sidebar — fixed on desktop, a drawer on mobile */}
-      <aside className="hidden md:block w-60 shrink-0 border-r" style={{ borderColor: 'var(--border-soft)' }}>
+      <aside className="community-sidebar hidden md:block shrink-0 border-r" style={{ borderColor: 'var(--border-soft)' }}>
         <Sidebar
           onPickScreenShare={() => setScreenShareOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -199,7 +204,7 @@ export default function Chat() {
       {sidebarOpen && (
         <div className="md:hidden fixed inset-0 z-40 flex">
           <div className="absolute inset-0 bg-black/55 animate-fade-in" onClick={() => setSidebarOpen(false)} />
-          <div className="relative w-[82vw] max-w-72 h-full animate-slide-in-right" style={{ transform: 'none' }}>
+          <div className="mobile-channel-drawer relative w-[82vw] max-w-72 h-full animate-slide-in-right" style={{ transform: 'none' }}>
             <button
               className="btn btn-subtle !p-1.5 absolute top-2.5 right-2.5 z-10"
               onClick={() => setSidebarOpen(false)}
@@ -247,8 +252,9 @@ export default function Chat() {
         </div>
       )}
 
+      {inboxOpen && <DirectMessages />}
       {/* Main column */}
-      <main className="flex-1 flex flex-col min-w-0" style={{ background: 'var(--surface-1)' }}>
+      <main className={`chat-main flex-1 flex flex-col min-w-0 min-h-0 ${inboxOpen ? '!hidden' : ''}`} style={{ background: 'var(--surface-1)' }}>
         <header
           className="h-14 px-3 sm:px-4 flex items-center gap-2 border-b shrink-0"
           style={{ borderColor: 'var(--border-soft)' }}
@@ -260,7 +266,7 @@ export default function Chat() {
           {channel ? (
             <>
               <ChannelIcon kind={channel.kind} isPrivate={channel.is_private} size={17} />
-              <h1 className="font-semibold truncate shrink-0">{channel.name}</h1>
+              <h1 className="font-semibold truncate min-w-0">{channel.name}</h1>
               {channel.topic && (
                 <>
                   <span className="w-px h-5 shrink-0 hidden sm:block" style={{ background: 'var(--border)' }} />
@@ -359,7 +365,7 @@ export default function Chat() {
       </main>
 
       {/* Member list */}
-      {membersOpen && (
+      {membersOpen && !inboxOpen && (
         <>
           <aside className="hidden xl:block w-60 shrink-0 border-l" style={{ borderColor: 'var(--border-soft)' }}>
             <MemberList onOpenProfile={openProfile} />
@@ -383,6 +389,8 @@ export default function Chat() {
       )}
 
       {/* Overlays */}
+      <MemberActions onProfile={openProfile} />
+      <DirectCallOverlay onShare={() => setScreenShareOpen(true)} />
       <ScreenShareDialog open={screenShareOpen} onClose={() => setScreenShareOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} onOpenProfile={openProfile} />

@@ -161,7 +161,7 @@ export default function Channels() {
   )
 }
 
-function ChannelEditor({ channel, onDeleted }: { channel: Channel; onDeleted: () => void }) {
+export function ChannelEditor({ channel, onDeleted }: { channel: Channel; onDeleted: () => void }) {
   const categories = useStore((s) => s.categories)
   const roles = useStore((s) => s.roles)
   const confirm = useConfirm()

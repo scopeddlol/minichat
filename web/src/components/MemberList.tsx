@@ -73,7 +73,7 @@ export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: 
   const onlineCount = Object.values(members).filter((m) => m.presence !== 'offline').length
 
   return (
-    <div className="h-full flex flex-col" style={{ background: 'var(--surface-0)' }}>
+    <div className="member-panel h-full min-h-0 flex flex-col" style={{ background: 'var(--surface-0)' }}>
       <header className="px-3 py-2.5 border-b shrink-0 xl:pr-3 pr-12" style={{ borderColor: 'var(--border-soft)' }}>
         <div className="relative">
           <Search
@@ -93,7 +93,7 @@ export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: 
         </p>
       </header>
 
-      <div className="flex-1 overflow-y-auto scroll-thin px-2 py-2 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto scroll-thin px-2 py-2 space-y-3">
         {groups.map((group) => (
           <div key={group.label}>
             <p
@@ -111,6 +111,7 @@ export default function MemberList({ onOpenProfile }: { onOpenProfile: (userId: 
                 return (
                   <button
                     key={member.id}
+                    data-user-id={member.id}
                     onClick={() => onOpenProfile(member.id)}
                     className="w-full flex items-center gap-2.5 px-1.5 py-1.5 rounded-lg transition-colors hover:bg-[var(--surface-2)] text-left"
                     style={{ opacity: member.presence === 'offline' ? 0.55 : 1 }}

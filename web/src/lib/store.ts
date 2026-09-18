@@ -400,6 +400,21 @@ export const useStore = create<AppState>((set, get) => ({
         break
       }
 
+      case 'ACCESS_UPDATE': {
+        const channels = sortChannels(d.channels as Channel[])
+        const visible = new Set(channels.map(c => c.id))
+        const active = visible.has(get().activeChannelId ?? '') ? get().activeChannelId : channels.find(c => c.kind === 'text')?.id ?? null
+        set(s => ({
+          channels, categories: d.categories, permissions: toBits(d.permissions),
+          channelPermissions: Object.fromEntries(Object.entries(d.channel_permissions as Record<string,string>).map(([id,bits]) => [id,toBits(bits)])),
+          activeChannelId: active,
+          messages: Object.fromEntries(Object.entries(s.messages).filter(([id]) => visible.has(id))),
+          voiceStates: Object.fromEntries(Object.entries(s.voiceStates).filter(([,vs]) => visible.has(vs.channel_id))),
+        }))
+        if (active && !get().messages[active]) void get().loadMessages(active)
+        break
+      }
+
       case 'MENTION_ADD': {
         const { channel_id } = d as { channel_id: string }
         if (get().activeChannelId === channel_id && document.visibilityState === 'visible') break
@@ -537,12 +552,12 @@ export const useStore = create<AppState>((set, get) => ({
         break
       }
 
-      case 'MEMBER_ADD':
       case 'RELATIONSHIPS_STALE': {
         void get().refreshRelationships()
         break
       }
 
+      case 'MEMBER_ADD':
       case 'MEMBER_UPDATE': {
         const member = d as Member
         const isMe = get().me?.id === member.id

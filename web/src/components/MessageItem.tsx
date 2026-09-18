@@ -193,17 +193,26 @@ function MessageItemInner({
 
   const jumbo = isJumboEmoji(message.content) && !message.attachments.length
 
+
   return (
     <article
-      className="group relative px-4 transition-colors"
+      tabIndex={0}
+
+      onKeyDown={event => {
+        if (event.target !== event.currentTarget || !(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return
+        event.preventDefault(); event.stopPropagation()
+        const rect = event.currentTarget.getBoundingClientRect()
+        menu.open({ clientX: rect.left + 24, clientY: rect.bottom, preventDefault: () => undefined }, buildMenu())
+      }}
+      className="chat-message group relative px-4 transition-colors"
       style={{
         background: highlight
           ? 'color-mix(in oklab, var(--accent) 10%, transparent)'
           : message.pinned
             ? 'color-mix(in oklab, var(--warning) 6%, transparent)'
             : undefined,
-        paddingTop: grouped ? 1 : 8,
-        paddingBottom: 1,
+        paddingTop: grouped ? 3 : 18,
+        paddingBottom: 3,
         opacity: message.pending ? 0.6 : 1,
       }}
       onMouseLeave={() => setPickerOpen(false)}
@@ -211,7 +220,7 @@ function MessageItemInner({
         // A right-click on a link or an image should stay the browser's, so
         // "open in new tab" and "save image" still work.
         const target = event.target as HTMLElement
-        if (target.closest('a, img, input, textarea')) return
+        if (target.closest('a, img, input, textarea, [data-user-id]')) return
         menu.open(event, buildMenu())
       }}
       {...longPress}
@@ -221,7 +230,7 @@ function MessageItemInner({
       <div className="relative">
         {replyTarget && (
           <button
-            className="flex items-center gap-1.5 mb-0.5 ml-12 text-[0.78rem] min-w-0 w-full text-left hover:opacity-80 transition-opacity"
+            className="flex items-center gap-1.5 mb-0.5 pl-12 text-[0.78rem] min-w-0 w-full text-left hover:opacity-80 transition-opacity"
             style={{ color: 'var(--text-faint)' }}
             onClick={() => jumpToMessage(message.channel_id, replyTarget.id)}
             title="Jump to the original message"
@@ -260,7 +269,7 @@ function MessageItemInner({
                 <Webhook size={16} />
               </div>
             ) : (
-              <button onClick={() => author && onOpenProfile(author.id)} className="rounded-full">
+              <button data-user-id={author?.id} onClick={() => author && onOpenProfile(author.id)} className="rounded-full">
                 <Avatar
                   id={author?.id ?? 'deleted'}
                   name={displayName}

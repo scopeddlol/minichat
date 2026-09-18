@@ -53,9 +53,10 @@ async fn sync_channel_from_category(
     channel_id: &str,
     category_id: &str,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = db.begin().await?;
     sqlx::query("DELETE FROM channel_overwrites WHERE channel_id = ?")
         .bind(channel_id)
-        .execute(db)
+        .execute(&mut *tx)
         .await?;
     sqlx::query(
         "INSERT INTO channel_overwrites (channel_id, role_id, allow, deny)
@@ -63,8 +64,9 @@ async fn sync_channel_from_category(
     )
     .bind(channel_id)
     .bind(category_id)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -471,11 +473,8 @@ pub async fn reorder(
 
 // ---- categories ----
 
-pub async fn list_categories(State(state): State<AppState>, _auth: Auth) -> AppResult<Json<Value>> {
-    let categories: Vec<Category> =
-        sqlx::query_as("SELECT * FROM categories ORDER BY position, name")
-            .fetch_all(&state.db)
-            .await?;
+pub async fn list_categories(State(state): State<AppState>, auth: Auth) -> AppResult<Json<Value>> {
+    let categories = access::visible_categories(&state, &auth).await?;
     Ok(Json(json!(categories)))
 }
 

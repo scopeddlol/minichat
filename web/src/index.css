@@ -1,5 +1,71 @@
 @import 'tailwindcss';
 
+/* v0.4: quiet surfaces, comfortable rhythm, bounded flex/scroll regions. */
+html, body { width: 100%; overflow: hidden; }
+#root { min-width: 0; overflow-y: auto; overflow-x: hidden; }
+button, input, textarea, select { font: inherit; }
+button { touch-action: manipulation; }
+img, video { max-width: 100%; }
+.chat-shell { height: 100%; isolation: isolate; }
+.community-sidebar { width: clamp(240px, 20vw, 288px); }
+.community-nav > header { height: 76px; padding: 20px; }
+.community-nav > nav { padding: 12px 16px 24px; }
+.community-nav [data-channel-id] { padding: 11px 12px; border-radius: 7px; gap: 10px; }
+.community-nav [data-channel-id]:focus-visible { outline-offset: -2px; }
+.chat-main > header { height: 76px; padding-inline: clamp(16px, 3vw, 32px); gap: 12px; }
+.chat-main > header > h1 { max-width: min(32vw, 260px); flex-shrink: 0; }
+.member-panel > header { padding: 20px 16px; }
+.member-panel [data-user-id] { padding: 10px 8px; }
+.inbox-button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; border-radius: 7px; color: var(--text-muted); cursor: pointer; }
+.inbox-button:hover, .inbox-button.selected { background: var(--surface-2); color: var(--text); }
+.navigation-label { font-size: 10px; font-weight: 650; letter-spacing: .12em; color: var(--text-faint); padding: 26px 12px 0; }
+.unread-dot { border-radius: 6px; padding: 2px 6px; font-size: 11px; background: var(--accent-soft); color: var(--text); }
+.inbox { display: flex; flex: 1; min-width: 0; min-height: 0; background: var(--surface-1); }
+.inbox-list { width: clamp(220px, 24vw, 310px); display: flex; flex-direction: column; border-right: 1px solid var(--border-soft); min-height: 0; }
+.workspace-header { min-height: 76px; display: flex; align-items: center; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--border-soft); flex-shrink: 0; }
+.workspace-header h1, .workspace-header h2 { font-weight: 650; }
+.workspace-header h1 { flex: 1; }
+.conversation-row { width: 100%; display: flex; gap: 12px; align-items: center; text-align: left; padding: 14px 10px; border-radius: 7px; cursor: pointer; font-size: 14px; }
+.conversation-row:hover, .conversation-row.selected { background: var(--surface-2); }
+.conversation-row strong { font-weight: 550; }
+.inbox-thread { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.inbox-thread-empty { align-items: center; justify-content: center; }
+.direct-history { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 28px clamp(16px, 3vw, 40px); }
+.direct-message { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 24px; font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.direct-composer { display: flex; gap: 12px; align-items: flex-end; margin: 0 clamp(16px, 3vw, 40px) 24px; padding-top: 12px; }
+.direct-composer textarea { max-height: 180px; min-width: 0; line-height: 1.6; padding: 14px; }
+.direct-composer > button { min-height: 48px; }
+.context-menu { position: fixed; z-index: 100; width: 244px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; padding: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-1); box-shadow: var(--shadow-lg); }
+.context-menu button { display: block; text-align: left; width: 100%; border-radius: 5px; padding: 11px 12px; font-size: 13px; cursor: pointer; }
+.context-menu button:hover, .context-menu button:focus { background: var(--surface-3); outline: none; }
+.call-panel { position: fixed; bottom: 24px; right: 24px; width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 80px); display: flex; flex-direction: column; z-index: 45; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); overflow: auto; }
+.call-panel-connected { height: min(440px, calc(100dvh - 80px)); }
+.call-panel .workspace-header { min-height: 64px; }
+[role=dialog] { max-height: calc(100dvh - 32px); min-width: 0; }
+[role=dialog] > header, [role=dialog] > footer { flex-shrink: 0; }
+[role=dialog] > div { min-height: 0; min-width: 0; }
+[role=dialog] footer { flex-wrap: wrap; }
+.prose-chat { overflow-wrap: anywhere; }
+.chat-message { padding-inline: clamp(16px, 3vw, 32px); }
+.channel-composer { padding: 16px clamp(16px, 3vw, 32px) max(20px, env(safe-area-inset-bottom)); }
+@media (max-width: 1023px) {
+  .inbox-list { width: 100%; border: 0; }
+  .inbox-list-selected, .inbox-thread-empty { display: none; }
+  .workspace-header { padding-inline: 16px; }
+}
+@media (max-width: 767px) {
+  .mobile-channel-drawer .community-nav > header { padding-right: 58px; }
+  .chat-main > header { height: 64px; padding-inline: 12px; gap: 8px; }
+  .chat-main > header > h1 { max-width: none; flex: 1; flex-shrink: 1; }
+  .inbox-list { width: 100%; border: 0; }
+  .inbox-list-selected, .inbox-thread-empty { display: none; }
+  .direct-composer { margin-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .call-panel { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
 /* ---------------------------------------------------------------------------
    Design tokens. Every surface colour is a variable so the instance accent
    (set by the operator during setup) can retint the whole app at runtime.
@@ -9,7 +75,7 @@
     'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  --radius-card: 14px;
+  --radius-card: 10px;
   --radius-pill: 999px;
 }
 
@@ -26,17 +92,17 @@
      Each is mixed against --tint, which the instance may set to give the whole
      app a warm or cool cast. Unset, every mix resolves to its own base. */
   --tint-strength: 12%;
-  --bg: color-mix(in oklab, #0b0d13 calc(100% - var(--tint-strength)), var(--tint, #0b0d13));
-  --surface-0: color-mix(in oklab, #0f1219 calc(100% - var(--tint-strength)), var(--tint, #0f1219));
-  --surface-1: color-mix(in oklab, #151924 calc(100% - var(--tint-strength)), var(--tint, #151924));
-  --surface-2: color-mix(in oklab, #1c2130 calc(100% - var(--tint-strength)), var(--tint, #1c2130));
-  --surface-3: color-mix(in oklab, #252b3d calc(100% - var(--tint-strength)), var(--tint, #252b3d));
-  --border: color-mix(in oklab, #242a3a calc(100% - var(--tint-strength)), var(--tint, #242a3a));
-  --border-soft: color-mix(in oklab, #1c2131 calc(100% - var(--tint-strength)), var(--tint, #1c2131));
+  --bg: color-mix(in oklab, #101112 calc(100% - var(--tint-strength)), var(--tint, #101112));
+  --surface-0: color-mix(in oklab, #151617 calc(100% - var(--tint-strength)), var(--tint, #151617));
+  --surface-1: color-mix(in oklab, #1b1c1e calc(100% - var(--tint-strength)), var(--tint, #1b1c1e));
+  --surface-2: color-mix(in oklab, #232527 calc(100% - var(--tint-strength)), var(--tint, #232527));
+  --surface-3: color-mix(in oklab, #2c2e31 calc(100% - var(--tint-strength)), var(--tint, #2c2e31));
+  --border: color-mix(in oklab, #343639 calc(100% - var(--tint-strength)), var(--tint, #343639));
+  --border-soft: color-mix(in oklab, #292b2e calc(100% - var(--tint-strength)), var(--tint, #292b2e));
 
-  --text: #e8ebf5;
-  --text-muted: #9aa3bd;
-  --text-faint: #6b7590;
+  --text: #ededee;
+  --text-muted: #b2b4b8;
+  --text-faint: #85898f;
 
   --success: #34d399;
   --warning: #fbbf24;
@@ -55,16 +121,16 @@ html.light {
   color-scheme: light;
   /* Light surfaces need a lighter touch — the same strength reads muddy. */
   --tint-strength: 7%;
-  --bg: color-mix(in oklab, #f3f4f8 calc(100% - var(--tint-strength)), var(--tint, #f3f4f8));
+  --bg: color-mix(in oklab, #f4f4f4 calc(100% - var(--tint-strength)), var(--tint, #f4f4f4));
   --surface-0: color-mix(in oklab, #ffffff calc(100% - var(--tint-strength)), var(--tint, #ffffff));
-  --surface-1: color-mix(in oklab, #f7f8fb calc(100% - var(--tint-strength)), var(--tint, #f7f8fb));
-  --surface-2: color-mix(in oklab, #eef0f6 calc(100% - var(--tint-strength)), var(--tint, #eef0f6));
-  --surface-3: color-mix(in oklab, #e3e6ef calc(100% - var(--tint-strength)), var(--tint, #e3e6ef));
-  --border: color-mix(in oklab, #dde1eb calc(100% - var(--tint-strength)), var(--tint, #dde1eb));
-  --border-soft: color-mix(in oklab, #e8ebf2 calc(100% - var(--tint-strength)), var(--tint, #e8ebf2));
-  --text: #171a23;
-  --text-muted: #5b6377;
-  --text-faint: #8a92a6;
+  --surface-1: color-mix(in oklab, #fafafa calc(100% - var(--tint-strength)), var(--tint, #fafafa));
+  --surface-2: color-mix(in oklab, #eeeeef calc(100% - var(--tint-strength)), var(--tint, #eeeeef));
+  --surface-3: color-mix(in oklab, #e4e4e6 calc(100% - var(--tint-strength)), var(--tint, #e4e4e6));
+  --border: color-mix(in oklab, #d6d7d9 calc(100% - var(--tint-strength)), var(--tint, #d6d7d9));
+  --border-soft: color-mix(in oklab, #e7e7e8 calc(100% - var(--tint-strength)), var(--tint, #e7e7e8));
+  --text: #202124;
+  --text-muted: #5d6066;
+  --text-faint: #72767c;
   --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
   --shadow-md: 0 8px 24px -10px rgb(15 23 42 / 0.16);
   --shadow-lg: 0 24px 60px -20px rgb(15 23 42 / 0.22);
@@ -166,10 +232,10 @@ html.desktop body {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  border-radius: 10px;
+  border-radius: 7px;
   font-weight: 560;
   font-size: 0.875rem;
-  padding: 0.55rem 0.95rem;
+  padding: 0.65rem 1rem;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease,
     opacity 0.15s ease, box-shadow 0.15s ease;
   cursor: pointer;
@@ -188,7 +254,7 @@ html.desktop body {
 @utility btn-primary {
   background: var(--accent);
   color: var(--accent-ink);
-  box-shadow: 0 6px 20px -8px var(--accent-glow);
+  box-shadow: none;
 }
 .btn-primary:hover:not(:disabled) {
   background: color-mix(in oklab, var(--accent) 88%, white);
@@ -225,7 +291,7 @@ html.desktop body {
   width: 100%;
   background: var(--surface-0);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 7px;
   padding: 0.6rem 0.8rem;
   color: var(--text);
   font-size: 0.9rem;
@@ -362,7 +428,7 @@ html.desktop body {
   background: var(--surface-0);
   border: 1px solid var(--border);
   padding: 0.7rem 0.85rem;
-  border-radius: 10px;
+  border-radius: 7px;
   overflow-x: auto;
   margin: 0.4rem 0;
 }

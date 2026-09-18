@@ -3,6 +3,7 @@ import {
   UserPlus, UserX, X,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useInbox } from '../lib/direct'
 import { api } from '../lib/api'
 import { formatFullDate, formatRelative } from '../lib/format'
 import { can, P } from '../lib/perms'
@@ -231,6 +232,7 @@ export default function ProfileModal({
               </div>
             )}
 
+            {!isMe && relationship?.kind !== 'blocked' && <button className="btn btn-subtle w-full mt-5" onClick={() => void useInbox.getState().openPeer(userId).then(onClose).catch(e => toast.error(e.message))}><MessageSquare size={16}/>Message</button>}
             {!isMe && relationship?.kind !== 'blocked' && (
               <div className="mt-5 pt-4 border-t" style={{ borderColor: 'var(--border-soft)' }}>
                 <button
@@ -240,7 +242,7 @@ export default function ProfileModal({
                   onClick={async () => {
                     const ok = await confirm({
                       title: `Block ${member.display_name}?`,
-                      body: "They won't be able to send you a friend request, and any friendship ends.",
+                      body: "This stops direct messages, calls and friend requests between you, and ends your friendship.",
                       confirmLabel: 'Block',
                       danger: true,
                     })

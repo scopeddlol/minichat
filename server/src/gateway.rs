@@ -61,7 +61,7 @@ async fn run(socket: WebSocket, state: AppState) -> Result<(), String> {
 
     // First frame must be IDENTIFY. Keeping the token out of the URL means it
     // never lands in proxy access logs.
-    let auth: Auth = loop {
+    let (mut auth, session_token): (Auth, String) = loop {
         let Some(Ok(msg)) = stream.next().await else {
             return Err("closed before identify".into());
         };
@@ -77,7 +77,7 @@ async fn run(socket: WebSocket, state: AppState) -> Result<(), String> {
             return Err("bad identify".into());
         };
         match authenticate(&state, &token).await {
-            Ok(auth) => break auth,
+            Ok(auth) => break (auth, token),
             Err(e) => {
                 let _ = sink
                     .send(Ws::Text(
@@ -149,11 +149,23 @@ async fn run(socket: WebSocket, state: AppState) -> Result<(), String> {
                 if matches!(
                     event.kind.as_str(),
                     "CHANNEL_CREATE" | "CHANNEL_UPDATE" | "CHANNEL_DELETE" | "ROLE_UPDATE"
-                        | "ROLE_DELETE" | "ROLE_CREATE" | "MEMBER_UPDATE"
+                        | "ROLE_DELETE" | "ROLE_CREATE" | "MEMBER_UPDATE" | "MEMBER_REMOVE"
+                        | "CATEGORY_CREATE" | "CATEGORY_UPDATE" | "CATEGORY_DELETE"
                 ) {
-                    if let Ok(ids) = access::visible_channel_ids(&state, &auth.role_ids, is_admin).await {
-                        visible = ids.into_iter().collect();
-                    }
+                    auth = match authenticate(&state, &session_token).await {
+                        Ok(auth) => auth,
+                        Err(_) => { let _ = sink.send(Ws::Text(json!({"t":"INVALID_SESSION","d":{}}).to_string().into())).await; break; }
+                    };
+                    let Ok(current) = snapshot::build(&state,&auth).await else { break };
+                    visible = current["channels"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_str().map(str::to_owned)).collect();
+                    let navigation = json!({"t":"ACCESS_UPDATE","d":{
+                        "channels":current["channels"],"categories":current["categories"],
+                        "permissions":current["permissions"],"channel_permissions":current["channel_permissions"]
+                    }});
+                    if sink.send(Ws::Text(navigation.to_string().into())).await.is_err() { break; }
+                    // The filtered replacement above also removes revoked channels.
+                    // Never forward globally broadcast private channel/category metadata.
+                    if event.kind.starts_with("CHANNEL_") || event.kind.starts_with("CATEGORY_") { continue; }
                 }
 
                 if !should_deliver(&event, &user_id, &visible, auth.permissions) {
@@ -178,6 +190,10 @@ async fn run(socket: WebSocket, state: AppState) -> Result<(), String> {
             }
 
             _ = heartbeat.tick() => {
+                if authenticate(&state, &session_token).await.is_err() {
+                    let _ = sink.send(Ws::Text(json!({"t":"INVALID_SESSION","d":{}}).to_string().into())).await;
+                    break;
+                }
                 if sink.send(Ws::Ping(Vec::new().into())).await.is_err() {
                     break;
                 }
@@ -195,6 +211,13 @@ fn should_deliver(
     visible: &HashSet<String>,
     permissions: i64,
 ) -> bool {
+    if event.kind == "VOICE_STATE_UPDATE"
+        && !event.data["channel_id"]
+            .as_str()
+            .is_some_and(|id| visible.contains(id))
+    {
+        return false;
+    }
     match &event.scope {
         Scope::All => true,
         Scope::User(target) => target == user_id,
@@ -312,6 +335,7 @@ async fn cleanup(state: &AppState, user_id: &str) {
     };
 
     if last {
+        let _ = crate::routes::direct::disconnect(state, user_id).await;
         state.voice.write().await.remove(user_id);
         state.emit_all("VOICE_STATE_LEAVE", json!({"user_id": user_id}));
         let _ = sqlx::query(

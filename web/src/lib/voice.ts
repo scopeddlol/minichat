@@ -11,6 +11,7 @@ import {
 import { create } from 'zustand'
 import { api } from './api'
 import { gateway } from './gateway'
+import { direct } from './direct'
 import {
   captureOptions, loadScreenShareSettings, publishOptions, saveScreenShareSettings,
   type ScreenShareSettings,
@@ -107,6 +108,8 @@ interface VoiceStore {
 }
 
 const trackKey = (identity: string, source: Track.Source) => `${identity}:${source}`
+let joinAttempt = 0
+let pendingRoom: Room | null = null
 
 export const useVoice = create<VoiceStore>((set, get) => ({
   room: null,
@@ -142,11 +145,13 @@ export const useVoice = create<VoiceStore>((set, get) => ({
     if (get().connecting) return
     if (get().channelId === channelId && get().connected) return
     if (get().room) await get().leave()
+    const attempt = ++joinAttempt
 
     set({ connecting: true, error: '', channelId })
 
     try {
       const grant = await api.voiceToken(channelId)
+      if (attempt !== joinAttempt) return
       const room = new Room({
         adaptiveStream: true,
         dynacast: true,
@@ -163,8 +168,11 @@ export const useVoice = create<VoiceStore>((set, get) => ({
         },
       })
 
+      pendingRoom = room
       wireEvents(room, set, get)
       await room.connect(grant.url, grant.token)
+      if (attempt !== joinAttempt) { await room.disconnect(); return }
+      pendingRoom = null
 
       set({
         room,
@@ -210,6 +218,9 @@ export const useVoice = create<VoiceStore>((set, get) => ({
       syncParticipants(room, set)
       publishVoiceState(channelId, get())
     } catch (error) {
+      if (attempt !== joinAttempt) return
+      await pendingRoom?.disconnect().catch(() => undefined)
+      pendingRoom = null
       set({
         connecting: false,
         connected: false,
@@ -221,7 +232,11 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   },
 
   async leave() {
+    ++joinAttempt
+    const pending = pendingRoom
+    pendingRoom = null
     const room = get().room
+    const leavingChannel = get().channelId
     set({
       room: null,
       channelId: null,
@@ -241,7 +256,9 @@ export const useVoice = create<VoiceStore>((set, get) => ({
         /* already gone */
       }
     }
+    if (pending && pending !== room) await pending.disconnect().catch(() => undefined)
     gateway.send({ op: 'voice_state', channel_id: null })
+    if (leavingChannel?.startsWith('direct:')) await direct.action(leavingChannel.slice(7), 'end').catch(() => undefined)
   },
 
   async toggleMute() {
@@ -483,10 +500,14 @@ function wireEvents(room: Room, set: Setter, get: () => VoiceStore) {
       },
     )
     .on(RoomEvent.Disconnected, () => {
+      if (get().room !== room) return
+      const disconnectedChannel = get().channelId
       set({ connected: false, room: null, channelId: null, participants: [], tracks: {} })
       gateway.send({ op: 'voice_state', channel_id: null })
+      if (disconnectedChannel?.startsWith('direct:')) void direct.action(disconnectedChannel.slice(7), 'end').catch(() => undefined)
     })
     .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
+      if (get().room !== room) return
       set({ connected: state === ConnectionState.Connected })
     })
 }
@@ -511,6 +532,7 @@ function syncParticipants(room: Room, set: Setter) {
 }
 
 function publishVoiceState(channelId: string, state: Partial<VoiceStore>) {
+  if (channelId.startsWith('direct:')) return
   gateway.send({
     op: 'voice_state',
     channel_id: channelId,
@@ -523,6 +545,10 @@ function publishVoiceState(channelId: string, state: Partial<VoiceStore>) {
 
 /** Disconnect when a moderator drops us from voice. */
 gateway.on((event) => {
+  if (event.t === 'ACCESS_UPDATE') {
+    const channel = useVoice.getState().channelId
+    if (channel && !channel.startsWith('direct:') && !event.d.channels.some((c: { id: string }) => c.id === channel)) void useVoice.getState().leave()
+  }
   if (event.t === 'VOICE_FORCE_DISCONNECT') void useVoice.getState().leave()
   if (event.t === 'CHANNEL_DELETE' && useVoice.getState().channelId === event.d.id) {
     void useVoice.getState().leave()
