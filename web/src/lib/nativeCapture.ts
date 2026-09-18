@@ -25,18 +25,22 @@ export async function nativeScreenTrack(settings: ScreenShareSettings): Promise<
 }> {
   // Unlock audio in the original Share click, before waiting for the native
   // window. The click in another webview cannot grant this page activation.
-  let audioContext: AudioContext | undefined = new AudioContext({
-    sampleRate: 48000,
-  })
-  const resumed = audioContext.resume().then(
-    () => true,
-    () => false,
-  )
+  let audioContext: AudioContext | undefined
+  let resumed = Promise.resolve(false)
+  try {
+    audioContext = new AudioContext({ sampleRate: 48000 })
+    resumed = audioContext.resume().then(
+      () => true,
+      () => false,
+    )
+  } catch {
+    // Video-only sharing remains available without an audio device.
+  }
   let selected: { session: number; name: string; audio: boolean }
   try {
     selected = await invoke('choose_capture')
   } catch (error) {
-    void audioContext.close().catch(() => undefined)
+    void audioContext?.close().catch(() => undefined)
     throw error
   }
   const canvas = document.createElement('canvas')
@@ -79,7 +83,7 @@ export async function nativeScreenTrack(settings: ScreenShareSettings): Promise<
     track = canvas.captureStream(settings.fps).getVideoTracks()[0]
     track.contentHint = settings.content
     if (selected.audio) {
-      if (!(await resumed)) throw new Error('Could not start shared audio.')
+      if (!audioContext || !(await resumed)) throw new Error('Could not start shared audio.')
       const destination = audioContext.createMediaStreamDestination()
       audio = destination.stream.getAudioTracks()[0]
       let scheduled = 0
@@ -115,7 +119,7 @@ export async function nativeScreenTrack(settings: ScreenShareSettings): Promise<
       }
       void pumpAudio()
     } else {
-      void audioContext.close().catch(() => undefined)
+      void audioContext?.close().catch(() => undefined)
       audioContext = undefined
     }
     const next = async () => {

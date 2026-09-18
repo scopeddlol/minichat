@@ -13,7 +13,7 @@ globalThis.localStorage = {
 globalThis.document = { visibilityState: 'visible' }
 const result = await build({
   stdin: {
-    contents: `export { useStore } from './src/lib/store'; export { useInbox } from './src/lib/direct'; export { useVoice } from './src/lib/voice'; export { moveChannel } from './src/lib/channelOrder'`,
+    contents: `export { useStore } from './src/lib/store'; export { useInbox } from './src/lib/direct'; export { useVoice } from './src/lib/voice'; export { moveChannel } from './src/lib/channelOrder'; export { nativeScreenTrack } from './src/lib/nativeCapture'`,
     resolveDir: fileURLToPath(new URL('..', import.meta.url)),
     loader: 'ts',
   },
@@ -23,9 +23,74 @@ const result = await build({
   format: 'esm',
   logLevel: 'silent',
 })
-const { useStore, useInbox, useVoice, moveChannel } = await import(
+const { useStore, useInbox, useVoice, moveChannel, nativeScreenTrack } = await import(
   `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`
 )
+
+test('native video-only capture works without an audio device and releases its session', async (t) => {
+  const saved = Object.fromEntries(
+    ['AudioContext', 'window', 'document', 'createImageBitmap'].map((k) => [k, globalThis[k]]),
+  )
+  t.after(() => Object.assign(globalThis, saved))
+  const stopped = []
+  const track = new EventTarget()
+  track.stop = () => stopped.push('track')
+  globalThis.AudioContext = class {
+    constructor() {
+      throw new Error('No audio device')
+    }
+  }
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async (command, args) => {
+          if (command === 'choose_capture') return { session: 99, name: 'Screen', audio: false }
+          if (command === 'capture_frame') return new ArrayBuffer(0)
+          if (command === 'stop_capture') stopped.push(args.session)
+        },
+      },
+    },
+  }
+  globalThis.document = {
+    createElement: () => ({
+      getContext: () => ({ drawImage() {} }),
+      captureStream: () => ({ getVideoTracks: () => [track] }),
+    }),
+  }
+  globalThis.createImageBitmap = async () => ({ width: 32, height: 18, close() {} })
+  const capture = await nativeScreenTrack({ resolution: '720p', fps: 30, content: 'detail' })
+  capture.stop()
+  assert.deepEqual(stopped, ['track', 99])
+})
+
+test('cancelling the native picker closes the unlocked audio context', async (t) => {
+  const saved = { AudioContext: globalThis.AudioContext, window: globalThis.window }
+  t.after(() => Object.assign(globalThis, saved))
+  let closed = false
+  globalThis.AudioContext = class {
+    resume() {
+      return Promise.resolve()
+    }
+    close() {
+      closed = true
+      return Promise.resolve()
+    }
+  }
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        invoke: async () => {
+          throw new Error('Capture cancelled')
+        },
+      },
+    },
+  }
+  await assert.rejects(
+    nativeScreenTrack({ resolution: '720p', fps: 30, content: 'detail' }),
+    /Capture cancelled/,
+  )
+  assert.equal(closed, true)
+})
 
 test('messages and mentions in the previous channel remain unread while in DMs', () => {
   useStore.setState({
