@@ -1,9 +1,11 @@
+import { moveChannel } from '../lib/channelOrder'
 import {
-  MessageSquare, ChevronDown, FolderPlus, Hash, Headphones, Link2, Lock, Megaphone, Mic, MicOff, Pencil, Plus,
+  MessageSquare, ChevronDown, FolderPlus, Hash, Link2, Lock, Megaphone, MicOff, Pencil, Plus,
   ScreenShare, Settings, Shield, Sparkles, Trash2, UserPlus, Video, Volume2, VolumeX,
   PhoneOff, Users,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import VoiceDeviceControl from './VoiceDeviceControl'
 import { useInbox } from '../lib/direct'
 import { api } from '../lib/api'
 import { can, P } from '../lib/perms'
@@ -39,6 +41,22 @@ export default function Sidebar({
   onOpenProfile,
   onNavigate,
 }: SidebarProps) {
+  const dragId = useRef<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [reordering, setReordering] = useState(false)
+  const reorder = async (category: string | null, target: string | null) => {
+    const id = dragId.current
+    dragId.current = null
+    setDropTarget(null)
+    if (!id || !canManageChannels || reordering || id === target) return
+    const ordered = moveChannel(useStore.getState().channels, id, category, target)
+    setReordering(true)
+    try {
+      await api.reorderChannels(ordered.map(c => ({ id: c.id, category_id: c.category_id, position: c.position })))
+      // Gateway snapshots remain authoritative, including inherited permissions.
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not reorder channels.') }
+    finally { setReordering(false) }
+  }
   const inboxOpen = useInbox(s => s.open)
   const conversations = useInbox(s => s.conversations)
   const unreadDirect = conversations.reduce((n,c) => n + c.unread, 0)
@@ -230,6 +248,30 @@ export default function Sidebar({
       {/* Channels */}
       <nav
         className="flex-1 min-h-0 overflow-y-auto scroll-thin px-2 py-3 space-y-4"
+        aria-label="Community channels"
+        onDragStart={event => {
+          const row = (event.target as HTMLElement).closest<HTMLElement>('[data-channel-id]')
+          if (!canManageChannels || reordering || !row) { event.preventDefault(); return }
+          dragId.current = row.dataset.channelId ?? null
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', dragId.current ?? '')
+        }}
+        onDragOver={event => {
+          if (!dragId.current) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          const row = (event.target as HTMLElement).closest<HTMLElement>('[data-channel-id]')
+          setDropTarget(row?.dataset.channelId ?? null)
+        }}
+        onDragEnd={() => { dragId.current = null; setDropTarget(null) }}
+        onDrop={event => {
+          if (!dragId.current) return
+          event.preventDefault()
+          const row = (event.target as HTMLElement).closest<HTMLElement>('[data-channel-id]')
+          const target = channels.find(c => c.id === row?.dataset.channelId)
+          const group = (event.target as HTMLElement).closest<HTMLElement>('[data-category-id]')
+          void reorder(target?.category_id ?? group?.dataset.categoryId ?? null, target?.id ?? null)
+        }}
         onContextMenu={(event) => {
           // Only empty space: a right-click that landed on a row is that
           // row's menu, handled by the row itself.
@@ -240,12 +282,14 @@ export default function Sidebar({
         {grouped.uncategorised.length > 0 && (
           <ChannelGroup
             channels={grouped.uncategorised}
-            activeChannelId={activeChannelId}
+            activeChannelId={inboxOpen ? null : activeChannelId}
             unread={unread}
             mentionCounts={mentionCounts}
             onSelect={select}
             onOpenProfile={onOpenProfile}
             buildMenu={channelMenu}
+            draggable={canManageChannels && !reordering}
+            dropTarget={dropTarget}
           />
         )}
 
@@ -254,7 +298,7 @@ export default function Sidebar({
           if (!list.length && !canManageChannels) return null
           const isCollapsed = collapsed[category.id]
           return (
-            <div key={category.id}>
+            <div key={category.id} data-category-id={category.id}>
               <button
                 className="w-full flex items-center gap-1 px-1.5 mb-1 group"
                 onClick={() => setCollapsed((value) => ({ ...value, [category.id]: !value[category.id] }))}
@@ -286,12 +330,14 @@ export default function Sidebar({
               {!isCollapsed && (
                 <ChannelGroup
                   channels={list}
-                  activeChannelId={activeChannelId}
+                  activeChannelId={inboxOpen ? null : activeChannelId}
                   unread={unread}
                   mentionCounts={mentionCounts}
                   onSelect={select}
                   onOpenProfile={onOpenProfile}
                   buildMenu={channelMenu}
+            draggable={canManageChannels && !reordering}
+            dropTarget={dropTarget}
                 />
               )}
             </div>
@@ -341,7 +387,11 @@ function ChannelRow({
   buildMenu,
   onSelect,
   children,
+  draggable,
+  dropTarget,
 }: {
+  draggable: boolean
+  dropTarget: string | null
   channel: Channel
   active: boolean
   /** Drives the bold-and-brighter treatment an unread channel gets. */
@@ -357,12 +407,15 @@ function ChannelRow({
 
   return (
     <button
+      draggable={draggable}
+      aria-current={active ? "page" : undefined}
       data-channel-id={channel.id}
       onClick={() => onSelect(channel)}
       onContextMenu={(event) => menu.open(event, buildMenu(channel))}
       {...longPress}
       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors group"
       style={{
+        boxShadow: dropTarget === channel.id ? 'inset 0 2px var(--accent)' : undefined,
         background: active ? 'var(--surface-2)' : 'transparent',
         color: active || unreadCount > 0 ? 'var(--text)' : 'var(--text-muted)',
         fontWeight: unreadCount > 0 ? 600 : 500,
@@ -387,7 +440,11 @@ function ChannelGroup({
   onSelect,
   onOpenProfile,
   buildMenu,
+  draggable,
+  dropTarget,
 }: {
+  draggable: boolean
+  dropTarget: string | null
   channels: Channel[]
   activeChannelId: string | null
   unread: Record<string, number>
@@ -410,6 +467,8 @@ function ChannelGroup({
         return (
           <div key={channel.id}>
             <ChannelRow
+              draggable={draggable}
+              dropTarget={dropTarget}
               channel={channel}
               active={active}
               unreadCount={count}
@@ -535,8 +594,8 @@ export function ChannelIcon({
 /** Live voice controls, shown only while connected to a channel. */
 function VoiceDock({ onPickScreenShare }: { onPickScreenShare: () => void }) {
   const {
-    connected, connecting, channelId, muted, deafened, cameraOn, screenSharing,
-    canVideo, canScreenShare, canSpeak, pushToTalkActive,
+    connected, connecting, channelId, cameraOn, screenSharing,
+    canVideo, canScreenShare, pushToTalkActive,
   } = useVoice()
   const voice = useVoice()
   const channels = useStore((s) => s.channels)
@@ -573,24 +632,8 @@ function VoiceDock({ onPickScreenShare }: { onPickScreenShare: () => void }) {
       </div>
 
       <div className="grid grid-cols-4 gap-1.5">
-        <VoiceButton
-          active={!muted || pushToTalkActive}
-          disabled={!canSpeak}
-          onClick={() => void voice.toggleMute()}
-          title={muted ? 'Unmute' : 'Mute'}
-          danger={muted && !pushToTalkActive}
-          live={pushToTalkActive}
-        >
-          {muted && !pushToTalkActive ? <MicOff size={15} /> : <Mic size={15} />}
-        </VoiceButton>
-        <VoiceButton
-          active={!deafened}
-          onClick={() => void voice.toggleDeafen()}
-          title={deafened ? 'Undeafen' : 'Deafen'}
-          danger={deafened}
-        >
-          {deafened ? <VolumeX size={15} /> : <Headphones size={15} />}
-        </VoiceButton>
+        <VoiceDeviceControl kind="audioinput" />
+        <VoiceDeviceControl kind="audiooutput" />
         <VoiceButton
           active={cameraOn}
           disabled={!canVideo}

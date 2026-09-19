@@ -26,6 +26,10 @@ use tauri::window::Color;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 #[cfg(windows)]
+mod capture;
+#[cfg(windows)]
+mod capture_audio;
+#[cfg(windows)]
 mod win;
 
 /// Window commands the connected instance is allowed to call.
@@ -367,10 +371,20 @@ fn open_main_window(
     }
 
     if let Some(existing) = app.get_webview_window("main") {
+        #[cfg(windows)]
+        capture::cancel();
         existing.destroy()?;
     }
 
-    let window = WebviewWindowBuilder::new(app, "main", target)
+    let builder = WebviewWindowBuilder::new(app, "main", target);
+    #[cfg(windows)]
+    let builder = builder
+        .initialization_script("window.__MINICHAT_NATIVE_CAPTURE__ = true;")
+        .on_navigation(|_| {
+            capture::cancel();
+            true
+        });
+    let window = builder
         .title("MiniChat")
         .inner_size(1180.0, 820.0)
         .min_inner_size(420.0, 520.0)
@@ -533,9 +547,23 @@ fn on_window_event(window: &WebviewWindow, event: &WindowEvent) {
 }
 
 fn main() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![saved_instance, connect])
+    let builder =
+        tauri::Builder::default().plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    #[cfg(windows)]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        saved_instance,
+        connect,
+        capture::choose_capture,
+        capture::capture_sources,
+        capture::capture_thumbnail,
+        capture::capture_select,
+        capture::capture_frame,
+        capture::capture_audio,
+        capture::stop_capture
+    ]);
+    #[cfg(not(windows))]
+    let builder = builder.invoke_handler(tauri::generate_handler![saved_instance, connect]);
+    builder
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 if let Some(webview) = window.get_webview_window("main") {

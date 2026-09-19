@@ -449,7 +449,44 @@ pub async fn reorder(
 ) -> AppResult<Json<Value>> {
     auth.require(perms::MANAGE_CHANNELS)?;
     let mut tx = state.db.begin().await?;
+    let mut seen = std::collections::HashSet::new();
     for entry in &input.channels {
+        if !seen.insert(&entry.id) || entry.position < 0 {
+            return Err(AppError::bad("Invalid channel order."));
+        }
+        let channel: Channel = sqlx::query_as("SELECT * FROM channels WHERE id = ?")
+            .bind(&entry.id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::not_found("Channel not found."))?;
+        if let Some(category) = &entry.category_id {
+            let exists: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM categories WHERE id = ?)")
+                    .bind(category)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if !exists {
+                return Err(AppError::bad("Category not found."));
+            }
+        }
+        // Moving a synced channel must switch its copied permissions in the
+        // same transaction, never leave it using the previous category's rules.
+        if channel.category_id != entry.category_id && channel.sync_category {
+            if let Some(category) = &entry.category_id {
+                sqlx::query("DELETE FROM channel_overwrites WHERE channel_id = ?")
+                    .bind(&entry.id)
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("INSERT INTO channel_overwrites (channel_id, role_id, allow, deny) SELECT ?, role_id, allow, deny FROM category_overwrites WHERE category_id = ?")
+                    .bind(&entry.id).bind(category).execute(&mut *tx).await?;
+            } else {
+                // Preserve the last permissions when taking it out of a category.
+                sqlx::query("UPDATE channels SET sync_category = 0 WHERE id = ?")
+                    .bind(&entry.id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
         sqlx::query("UPDATE channels SET position = ?, category_id = ? WHERE id = ?")
             .bind(entry.position)
             .bind(&entry.category_id)

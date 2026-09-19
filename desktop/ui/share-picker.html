@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Share your screen · MiniChat</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          Inter,
+          Segoe UI,
+          sans-serif;
+        background: #191a1c;
+        color: #ededee;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 24px 28px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      h1 {
+        font-size: 22px;
+        margin: 0;
+      }
+      p {
+        color: #aaaeb6;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+        color: inherit;
+        border: 1px solid #393b41;
+        background: #24262a;
+        border-radius: 9px;
+        padding: 10px 16px;
+      }
+      button:hover,
+      button:focus-visible {
+        background: #34363c;
+        outline: 2px solid #979daa;
+        outline-offset: 2px;
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      button[aria-selected="true"] {
+        border-color: #ddd;
+        background: #36383d;
+      }
+      nav {
+        display: flex;
+        gap: 8px;
+        padding: 0 28px 16px;
+      }
+      main {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 0 28px 24px;
+      }
+      #sources {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+        gap: 14px;
+      }
+      .source {
+        text-align: left;
+        padding: 10px;
+        min-width: 0;
+      }
+      .source img {
+        width: 100%;
+        aspect-ratio: 16/9;
+        object-fit: contain;
+        background: #111;
+        border-radius: 5px;
+      }
+      .source span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+      footer {
+        padding: 18px 28px;
+        border-top: 1px solid #313338;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .primary {
+        background: #e6e7e9;
+        color: #17181a;
+        font-weight: 600;
+      }
+      #error {
+        color: #f7a3a3;
+      }
+      #sharing {
+        display: none;
+      }
+      .status {
+        display: inline-block;
+        background: #91c5a2;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 8px;
+      }
+      .sharing header {
+        padding: 16px 22px 4px;
+      }
+      .sharing header h1 {
+        font-size: 16px;
+      }
+      .sharing main {
+        padding: 0 22px;
+      }
+      .sharing h2 {
+        font-size: 17px;
+        margin: 8px 0;
+      }
+      .sharing p {
+        margin: 4px 0;
+      }
+      .sharing footer {
+        padding: 12px 22px;
+      }
+    </style>
+  </head>
+  <body>
+    <header data-tauri-drag-region>
+      <h1 data-tauri-drag-region>Share your screen</h1>
+      <button id="close" aria-label="Cancel screen sharing">✕</button>
+    </header>
+    <nav id="tabs" aria-label="Source type">
+      <button data-kind="screen" aria-pressed="true">Screens</button
+      ><button data-kind="window" aria-pressed="false">Windows</button
+      ><button id="refresh">Refresh</button>
+    </nav>
+    <main>
+      <p id="hint">Choose exactly what the people in your call can see.</p>
+      <p id="error" role="alert"></p>
+      <div id="sources" role="listbox" aria-label="Available sources"></div>
+      <div id="sharing">
+        <h2><span class="status"></span>You're sharing</h2>
+        <p id="shared-name"></p>
+        <p>Keep this window open while sharing. Closing it stops capture.</p>
+      </div>
+    </main>
+    <footer>
+      <div>
+        <label id="audio-choice"
+          ><input type="checkbox" id="audio" checked /> Share audio</label
+        >
+        <p id="detail">Screen: other apps. Window: selected app only.</p>
+      </div>
+      <button id="share" class="primary" disabled>Share screen</button
+      ><button id="stop" hidden>Stop sharing</button>
+    </footer>
+    <script src="share-picker.js"></script>
+  </body>
+</html>

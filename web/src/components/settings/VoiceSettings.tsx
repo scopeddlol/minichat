@@ -80,14 +80,14 @@ export default function VoiceSettings() {
           label="Microphone"
           options={voice.devices.audioinput}
           value={voice.selectedDevices.audioinput}
-          onChange={(id) => void voice.selectDevice('audioinput', id)}
+          onChange={(id) => void voice.selectDevice('audioinput', id).catch(() => undefined)}
         />
         <DevicePicker
           icon={<Headphones size={15} />}
           label="Output"
           options={voice.devices.audiooutput}
           value={voice.selectedDevices.audiooutput}
-          onChange={(id) => void voice.selectDevice('audiooutput', id)}
+          onChange={(id) => void voice.selectDevice('audiooutput', id).catch(() => undefined)}
           hint={
             voice.devices.audiooutput.length === 0
               ? 'Your browser does not allow choosing an output device — it follows the system default.'
@@ -99,7 +99,7 @@ export default function VoiceSettings() {
           label="Camera"
           options={voice.devices.videoinput}
           value={voice.selectedDevices.videoinput}
-          onChange={(id) => void voice.selectDevice('videoinput', id)}
+          onChange={(id) => void voice.selectDevice('videoinput', id).catch(() => undefined)}
         />
 
         {voice.devices.audioinput.every((device) => !device.label) && (

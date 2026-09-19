@@ -5,11 +5,9 @@
  * encoder bitrate we publish at, and the content hint that tells the encoder
  * whether to protect motion or detail.
  *
- * What we don't: the browser's own source picker and its "you're sharing"
- * indicator. Those are browser chrome — a page cannot remove or replace them,
- * by design, or any site could silently capture your screen. Bypassing them
- * needs the app to capture natively and hand frames to WebRTC, which is what
- * Discord's desktop client does.
+ * Browsers keep their own source picker and sharing indicator. The Windows
+ * desktop client instead uses the bundled native picker and frame/audio
+ * bridge in nativeCapture.ts, with an explicit selection and stop control.
  */
 
 export type ScreenResolution = '480' | '720' | '1080' | '1440' | 'native'
