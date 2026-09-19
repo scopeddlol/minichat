@@ -1,3 +1,4 @@
+import VoiceAudio from '../components/VoiceAudio'
 import CameraPicker from '../components/CameraPicker'
 import {
   Hash, Menu, Pin, Search, Users, WifiOff, X, Download,
@@ -389,6 +390,7 @@ export default function Chat() {
         </>
       )}
 
+      <VoiceAudio />
       {/* Overlays */}
       <MemberActions onProfile={openProfile} />
       <DirectCallOverlay onShare={() => setScreenShareOpen(true)} />

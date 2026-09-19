@@ -20,7 +20,13 @@ export function playVoiceSound(cue: Cue, output = 'default') {
   }
   void (async () => {
     try {
-      if (sink.setSinkId) await sink.setSinkId(output === 'default' ? '' : output)
+      // A saved headset may have been unplugged. Still play on the default
+      // output instead of swallowing the entire cue when routing fails.
+      if (sink.setSinkId) {
+        try { await sink.setSinkId(output === 'default' ? '' : output) }
+        catch { await sink.setSinkId('').catch(() => undefined) }
+      }
+      await ctx.resume()
       const notes: Record<Cue, number[]> = {
         join: [440, 660],
         leave: [660, 440],

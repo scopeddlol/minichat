@@ -1,3 +1,4 @@
+import { unlockVoiceSounds } from '../lib/voiceSounds'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, MessageSquare, Phone, Send, X } from 'lucide-react'
 import { direct, useInbox, type DirectMessage } from '../lib/direct'
@@ -206,7 +207,7 @@ export default function DirectMessages() {
                 className="btn btn-subtle"
                 disabled={!voiceEnabled}
                 title={voiceEnabled ? 'Start a call' : 'Calls are not configured'}
-                onClick={() => void direct.call(active).catch((e) => toast.error(e.message))}
+                onClick={() => { unlockVoiceSounds(); void direct.call(active).catch((e) => toast.error(e.message)) }}
               >
                 <Phone size={16} />
                 <span className="hidden sm:inline">Call</span>

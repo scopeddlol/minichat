@@ -87,12 +87,17 @@ function Menu({ state, onClose }: { state: MenuState; onClose: () => void }) {
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
-    ref.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
-    return () => { if (previous?.isConnected) previous.focus() }
+    return () => { if (previous?.isConnected) previous.focus({ preventScroll: true }) }
   }, [])
 
+  // Focus only after measurement makes the menu visible. Focusing before then
+  // fails, while scrolling an underlying message into view can dismiss it.
   useEffect(() => {
-    if (active >= 0) ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[state.items.slice(0, active).filter(item => !item.separator).length]?.focus()
+    if (sheet || pos) ref.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true })
+  }, [sheet, pos])
+
+  useEffect(() => {
+    if (active >= 0) ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[state.items.slice(0, active).filter(item => !item.separator).length]?.focus({ preventScroll: true })
   }, [active, state.items])
 
   // Measured, then placed: the menu's height depends on its items, and

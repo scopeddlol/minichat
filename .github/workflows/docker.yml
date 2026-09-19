@@ -11,6 +11,7 @@ name: Docker image
 on:
   push:
     branches:
+      - 'scopeddlol/main'
       - main
       - master
       - 'claude/**'

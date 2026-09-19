@@ -20,3 +20,10 @@ desktop/gen/
 
 # Incremental build caches
 *.tsbuildinfo
+
+desktop-native/bin/
+desktop-native/obj/
+web/test-results/
+web/playwright-report/
+desktop-native-tests/bin/
+desktop-native-tests/obj/

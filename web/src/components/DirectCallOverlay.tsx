@@ -1,3 +1,4 @@
+import { unlockVoiceSounds } from '../lib/voiceSounds'
 import VoiceDeviceControl from './VoiceDeviceControl'
 import { useEffect, useState } from 'react'
 import { Phone, PhoneOff, Video, ScreenShare } from 'lucide-react'
@@ -72,6 +73,7 @@ export default function DirectCallOverlay({ onShare }: { onShare: () => void }) 
   const connected = voice.channelId === `direct:${call.id}` && voice.connected
   const join = () =>
     void (async () => {
+      unlockVoiceSounds()
       try {
         if (call.status === 'ringing') await direct.action(call.id, 'accept')
         await voice.join(`direct:${call.id}`)

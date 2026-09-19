@@ -4,11 +4,12 @@ import { useInbox } from '../lib/direct'
 import { can, P } from '../lib/perms'
 import { useStore } from '../lib/store'
 import { useContextMenu, type MenuItem } from './ContextMenu'
-import { copyText, Modal, toast } from './ui'
+import { copyText, Modal, toast, useConfirm } from './ui'
 
 /** Member actions share the same menu provider as channels and messages. */
 export default function MemberActions({ onProfile }: { onProfile: (id: string) => void }) {
   const menu = useContextMenu()
+  const confirm = useConfirm()
   const [selected, setSelected] = useState<string | null>(null)
   const [nickname, setNickname] = useState('')
   const [busy, setBusy] = useState(false)
@@ -35,6 +36,14 @@ export default function MemberActions({ onProfile }: { onProfile: (id: string) =
       if (user.id !== state.me?.id && state.relationships[user.id]?.kind !== 'blocked') items.push({ label: 'Message', onSelect: () => { void useInbox.getState().openPeer(user.id).catch(e => toast.error(e.message)) } })
       if (manageable && (can(state.permissions, P.MANAGE_ROLES) || can(state.permissions, P.MANAGE_NICKNAMES))) items.push({ label: 'Roles & nickname', onSelect: () => { setSelected(user.id); setNickname(user.display_name) } })
       items.push({ label: 'Copy member ID', onSelect: () => { void copyText(user.id, 'Member ID copied') } })
+      const moderate = async (label: string, action: () => Promise<unknown>) => {
+        if (!await confirm({ title: `${label} ${user.display_name}?`, body: 'This changes their access to the community.', confirmLabel: label, danger: true })) return
+        try { await action(); toast.success(`${label} completed.`) }
+        catch (e) { toast.error(e instanceof Error ? e.message : 'Could not update member.') }
+      }
+      if (manageable && can(state.permissions, P.MOVE_MEMBERS)) items.push({ label: 'Disconnect from voice', onSelect: () => { void moderate('Disconnect', () => api.forceDisconnect(user.id)) } })
+      if (manageable && can(state.permissions, P.KICK_MEMBERS)) items.push({ label: 'Kick member', danger: true, onSelect: () => { void moderate('Kick', () => api.kickMember(user.id)) } })
+      if (manageable && can(state.permissions, P.BAN_MEMBERS)) items.push({ label: 'Ban member', danger: true, onSelect: () => { void moderate('Ban', () => api.banMember(user.id, '')) } })
       event.preventDefault(); event.stopPropagation()
       const rect = target.getBoundingClientRect()
       menu.open({ clientX: event instanceof MouseEvent ? event.clientX : rect.left, clientY: event instanceof MouseEvent ? event.clientY : rect.bottom, preventDefault: () => undefined }, items)
@@ -42,7 +51,7 @@ export default function MemberActions({ onProfile }: { onProfile: (id: string) =
     document.addEventListener('contextmenu', open, true)
     document.addEventListener('keydown', open, true)
     return () => { document.removeEventListener('contextmenu', open, true); document.removeEventListener('keydown', open, true) }
-  }, [menu, onProfile])
+  }, [menu, onProfile, confirm])
   return <Modal open={Boolean(member)} onClose={() => setSelected(null)} title={`Manage ${member?.display_name ?? 'member'}`}>
     {member && <div className="p-6 space-y-6">
       {can(permissions, P.MANAGE_NICKNAMES) && <form onSubmit={e => { e.preventDefault(); void act(() => api.updateMember(member.id, { display_name: nickname })) }}>

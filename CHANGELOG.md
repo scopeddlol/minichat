@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
+
+- Fixed silent incoming voice: remote microphone and screen-share audio now attach to persistent playback elements, including while browsing text or DMs. Blocked autoplay has an explicit Enable call audio button; local microphones never play back.
+- Fixed Windows channel dragging by disabling the Tauri native drop handler that intercepts HTML drag events.
+- Context menus focus after becoming visible without scrolling their underlying channel/message away. Member menus now include permission- and hierarchy-checked kick, ban and voice disconnect actions with confirmation.
+- Voice cues fall back to the default speaker if the saved output device is unavailable.
+- Started a Chromium-free Windows client in `desktop-native/` using native WPF controls. The independently buildable preview supports sign-in, channel browsing and text messaging; it is not yet a voice/video replacement.
+- Renamed the default branch to `scopeddlol/main` and included it in container publishing triggers.
+
+These changes require an updated server/web build; the Windows drag fix also requires a rebuilt desktop installer. Existing v0.4.0 installations do not update themselves from this branch.
 
 - Windows desktop screen sharing uses a bundled MiniChat screen/window picker with previews and an always-visible stop control. Capture requires an explicit selection in that local window. Optional audio shares the selected application, or other applications when sharing a display, excluding MiniChat's call audio.
 - Camera sharing opens a custom preview and device selector before publishing. Microphone and speaker menus are available beside mute/deafen in channels and private calls.

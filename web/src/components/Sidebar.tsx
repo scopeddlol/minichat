@@ -273,9 +273,9 @@ export default function Sidebar({
           void reorder(target?.category_id ?? group?.dataset.categoryId ?? null, target?.id ?? null)
         }}
         onContextMenu={(event) => {
-          // Only empty space: a right-click that landed on a row is that
-          // row's menu, handled by the row itself.
-          if (event.target !== event.currentTarget) return
+          // Row handlers prevent default; unused padding inside groups also
+          // belongs to the channel-list menu.
+          if (event.defaultPrevented) return
           menu.open(event, listMenu())
         }}
       >
@@ -302,6 +302,12 @@ export default function Sidebar({
               <button
                 className="w-full flex items-center gap-1 px-1.5 mb-1 group"
                 onClick={() => setCollapsed((value) => ({ ...value, [category.id]: !value[category.id] }))}
+                onKeyDown={event => {
+                  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+                  event.preventDefault()
+                  const rect = event.currentTarget.getBoundingClientRect()
+                  menu.open({ clientX: rect.left, clientY: rect.bottom, preventDefault() {} }, categoryMenu(category))
+                }}
                 onContextMenu={(event) => menu.open(event, categoryMenu(category))}
               >
                 <ChevronDown
@@ -411,6 +417,12 @@ function ChannelRow({
       aria-current={active ? "page" : undefined}
       data-channel-id={channel.id}
       onClick={() => onSelect(channel)}
+      onKeyDown={event => {
+        if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+        event.preventDefault()
+        const rect = event.currentTarget.getBoundingClientRect()
+        menu.open({ clientX: rect.left, clientY: rect.bottom, preventDefault() {} }, buildMenu(channel))
+      }}
       onContextMenu={(event) => menu.open(event, buildMenu(channel))}
       {...longPress}
       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors group"

@@ -251,6 +251,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   },
 
   async leave() {
+    unlockVoiceSounds()
     cancelNativePicker()
     ++shareAttempt
     stopNativeShare?.()
@@ -289,6 +290,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   },
 
   async toggleMute() {
+    unlockVoiceSounds()
     if (get().deafened) {
       await get().toggleDeafen()
       if (!get().muted) return
@@ -307,6 +309,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
   },
 
   async toggleDeafen() {
+    unlockVoiceSounds()
     const { room, deafened, muted, channelId, canSpeak } = get()
     if (!room) return
     const next = !deafened
@@ -315,7 +318,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
     // restores each member's own volume rather than resetting everyone to 1.
     const volumes = get().volumes
     room.remoteParticipants.forEach((participant) =>
-      participant.setVolume(next ? 0 : (volumes[participant.identity] ?? 1)),
+      setParticipantVolume(participant, next ? 0 : (volumes[participant.identity] ?? 1)),
     )
     const nextMuted = next || !canSpeak ? true : mutedBeforeDeafen
     if (next !== deafened) {
@@ -529,7 +532,7 @@ export const useVoice = create<VoiceStore>((set, get) => ({
     if (!room) return
     const participant = room.remoteParticipants.get(userId)
     // Deafened means silent regardless of individual volumes.
-    if (participant) participant.setVolume(get().deafened ? 0 : clamped)
+    if (participant) setParticipantVolume(participant, get().deafened ? 0 : clamped)
   },
 
   /**
@@ -567,6 +570,11 @@ function loadHotkeyPreferences(): {
 }
 
 type Setter = (partial: Partial<VoiceStore>) => void
+
+function setParticipantVolume(participant: RemoteParticipant, volume: number) {
+  participant.setVolume(volume, Track.Source.Microphone)
+  participant.setVolume(volume, Track.Source.ScreenShareAudio)
+}
 
 function wireEvents(room: Room, set: Setter, get: () => VoiceStore) {
   const resync = () => syncParticipants(room, set)
@@ -612,7 +620,7 @@ function wireEvents(room: Room, set: Setter, get: () => VoiceStore) {
       (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         if (track.kind === Track.Kind.Audio) {
           const stored = get().volumes[participant.identity]
-          participant.setVolume(get().deafened ? 0 : (stored ?? 1))
+          setParticipantVolume(participant, get().deafened ? 0 : (stored ?? 1))
         }
         set({
           tracks: {

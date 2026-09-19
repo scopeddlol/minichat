@@ -179,7 +179,7 @@ test('deafening silences other participants and restores the prior mic state', a
   useVoice.setState({
     room: {
       remoteParticipants: new Map([
-        ['peer', { identity: 'peer', setVolume: (v) => volumes.push(v) }],
+        ['peer', { identity: 'peer', setVolume: (v, source) => volumes.push([source, v]) }],
       ]),
       localParticipant: { setMicrophoneEnabled: async (v) => mic.push(v) },
     },
@@ -193,6 +193,6 @@ test('deafening silences other participants and restores the prior mic state', a
   assert.equal(useVoice.getState().muted, true)
   await useVoice.getState().toggleDeafen()
   assert.equal(useVoice.getState().muted, false)
-  assert.deepEqual(volumes, [0, 0.7])
+  assert.deepEqual(volumes, [['microphone', 0], ['screen_share_audio', 0], ['microphone', 0.7], ['screen_share_audio', 0.7]])
   assert.deepEqual(mic, [false, true])
 })

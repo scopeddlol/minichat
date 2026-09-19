@@ -385,6 +385,8 @@ fn open_main_window(
             true
         });
     let window = builder
+        // Let the page receive HTML5 channel/file drag events on Windows.
+        .disable_drag_drop_handler()
         .title("MiniChat")
         .inner_size(1180.0, 820.0)
         .min_inner_size(420.0, 520.0)
