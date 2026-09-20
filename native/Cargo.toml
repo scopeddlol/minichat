@@ -46,7 +46,18 @@ url = "2"
 # Slint 1.18 exposes no clipboard API, and "copy message text" is not a
 # feature worth dropping over it.
 arboard = { version = "3", default-features = false }
-livekit = { version = "0.7", optional = true }
+# The media half of voice. `default-features = false` to keep native-tls out:
+# the rest of this client is rustls, and one TLS stack is enough.
+livekit = { version = "0.9", optional = true, default-features = false, features = [
+    "tokio",
+    "rustls-tls-native-roots",
+] }
+# Minting room tokens. The instance does that in production — this is here so
+# the media engine can be tested against a real LiveKit server rather than
+# only compiled. Pulled in by the same feature, and by `livekit` regardless.
+livekit-api = { version = "0.7", optional = true, default-features = false, features = [
+    "access-token",
+] }
 # The native file picker for attachments. The XDG portal backend rather than
 # GTK: one fewer system library to depend on, and the portal is what a
 # sandboxed install would have to go through anyway.
@@ -62,10 +73,10 @@ notify-rust = { version = "4", default-features = false, features = ["z"] }
 [features]
 default = []
 # The media half of voice: `livekit`, and under it roughly 200MB of prebuilt
-# libwebrtc. Off by default because it needs clang 21 or newer to link on
-# Linux, and because everything else in this client builds and tests without
-# it. See src/voice.rs.
-voice = ["dep:livekit"]
+# libwebrtc, which needs clang 21 or newer to link. Off by default so that
+# everything else in this client — the whole control plane included — builds,
+# tests and ships without a C++ toolchain. See src/voice.rs.
+voice = ["dep:livekit", "dep:livekit-api"]
 
 # The tray lives on the platforms that ship. Linux would pull in GTK or
 # libayatana-appindicator, which is a system dependency the rest of this

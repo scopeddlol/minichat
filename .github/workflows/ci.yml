@@ -155,6 +155,56 @@ jobs:
             server/target/release/minichat-server \
             native/target/release/minichat-native
 
+  # The media half of voice, which the other native jobs deliberately do not
+  # build: `livekit` pulls in prebuilt libwebrtc and needs clang 21 or newer
+  # to link it. Kept separate so a toolchain this heavy cannot slow down or
+  # break the client's own tests.
+  native-voice:
+    name: Native client voice media
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          key: voice
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            pulseaudio
+      - name: Install clang 21
+        run: |
+          curl -sSLO https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          echo "CC=/usr/bin/clang-21" >> "$GITHUB_ENV"
+          echo "CXX=/usr/bin/clang++-21" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=/usr/lib/llvm-21/lib" >> "$GITHUB_ENV"
+      - name: Clippy
+        working-directory: native
+        run: cargo clippy --features voice --all-targets --locked -- -D warnings
+      - name: Test
+        working-directory: native
+        run: cargo test --features voice --locked
+      # A runner has no sound card, and libwebrtc's audio module will not
+      # start without one. Null devices are enough: what is being tested is
+      # that audio is published and subscribed, not how it sounds.
+      - name: Start virtual audio devices
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=speaker
+          pactl load-module module-null-source source_name=mic
+          pactl list short sources
+      - name: Join a real LiveKit room
+        working-directory: native
+        run: ./tests/voice.sh
+
   web:
     name: Web client
     runs-on: ubuntu-latest

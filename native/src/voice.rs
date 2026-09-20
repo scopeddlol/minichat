@@ -139,6 +139,51 @@ impl Session {
     }
 }
 
+/// Where the media engine is, as opposed to where the control plane is.
+///
+/// Connecting a room takes a moment and must not block the UI thread, so
+/// `connect` starts the work and this is what the UI polls while it happens.
+///
+/// Only the `voice` feature's engine ever reports anything but `Absent`, so
+/// in a build without it the rest are unconstructed. They are still the
+/// states a connection has.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Media {
+    /// No media stack, or none running: a build without the `voice` feature
+    /// is always here, and it is not an error.
+    #[default]
+    Absent,
+    Connecting,
+    Connected,
+    /// Connected, but something is missing — no microphone, or publishing it
+    /// failed. The member can hear everyone; they cannot be heard.
+    Degraded(String),
+    Failed(String),
+}
+
+impl Media {
+    /// What the session should say while the engine is here.
+    ///
+    /// Returns `None` for `Absent`, which is not a state to copy over the
+    /// session's own: a build with no media has already settled on
+    /// `ControlOnly`, and overwriting that with "disconnected" would tell a
+    /// member who is in the channel that they are not.
+    pub fn resolve(&self) -> Option<(Status, String)> {
+        match self {
+            Media::Absent => None,
+            Media::Connecting => Some((Status::Connecting, String::new())),
+            Media::Connected => Some((Status::Connected, String::new())),
+            // Connected and audible to nobody: in the channel, hearing
+            // everyone, with no microphone of their own. Saying which is the
+            // difference between a member who fixes it and one who decides
+            // voice is broken.
+            Media::Degraded(notice) => Some((Status::Connected, notice.clone())),
+            Media::Failed(notice) => Some((Status::Failed, notice.clone())),
+        }
+    }
+}
+
 /// The media engine.
 ///
 /// Implemented once, behind the `voice` feature, by a module that owns a
@@ -147,9 +192,10 @@ impl Session {
 /// What an implementation has to do, in the order the join path calls it:
 ///
 /// 1. `connect` — open the room with the grant's URL and token, publishing
-///    a microphone track when `can_speak`, with echo cancellation, automatic
-///    gain and noise suppression on. A member with no microphone, or who
-///    denies permission, stays connected as a listener rather than failing.
+///    a microphone track when `can_speak`. It returns at once and reports
+///    through `media`: a join that blocked the UI thread on a socket would
+///    freeze the whole client. A member with no microphone, or who denies
+///    permission, stays connected as a listener rather than failing.
 /// 2. `set_muted` / `set_deafened` — the local track's enabled state, and
 ///    the subscription state for everyone else's.
 /// 3. `speaking` — the identities LiveKit reports as active speakers, polled
@@ -161,7 +207,10 @@ impl Session {
 /// the screen-capture half already exists in `desktop/src/capture.rs` waiting
 /// to be moved across.
 pub trait Engine {
+    /// Start connecting. Returns immediately: `media` reports what happened.
     fn connect(&mut self, grant: &Grant, muted: bool) -> Result<(), String>;
+    /// Where the connection is, polled by the UI each frame.
+    fn media(&self) -> Media;
     fn set_muted(&mut self, muted: bool);
     fn set_deafened(&mut self, deafened: bool);
     /// Identities currently speaking.
@@ -174,12 +223,19 @@ pub trait Engine {
 /// It succeeds rather than failing: the control plane is genuinely working —
 /// you appear in the channel, you can see who else is there, and they can see
 /// you — and saying so is more honest than pretending the join failed.
+// Unused in a build with the `voice` feature, where `engine()` always picks
+// the LiveKit one. It stays because it is what makes the control plane
+// testable without a media stack.
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct NoMedia;
 
 impl Engine for NoMedia {
     fn connect(&mut self, _grant: &Grant, _muted: bool) -> Result<(), String> {
         Ok(())
+    }
+    fn media(&self) -> Media {
+        Media::Absent
     }
     fn set_muted(&mut self, _muted: bool) {}
     fn set_deafened(&mut self, _deafened: bool) {}
@@ -188,6 +244,9 @@ impl Engine for NoMedia {
     }
     fn disconnect(&mut self) {}
 }
+
+#[cfg(feature = "voice")]
+mod livekit_engine;
 
 /// The engine this build has.
 pub fn engine() -> Box<dyn Engine> {
@@ -264,6 +323,33 @@ mod tests {
         assert!(session.channel.is_empty());
         // Mute and deafen are preferences, not properties of the room.
         assert!(session.muted && session.deafened);
+    }
+
+    #[test]
+    fn a_degraded_connection_is_still_connected() {
+        // Someone whose microphone failed is in the channel and can hear
+        // everyone. Reporting that as a failed join would have them leave and
+        // rejoin to fix something rejoining cannot fix.
+        let (status, notice) = Media::Degraded("No microphone.".into())
+            .resolve()
+            .expect("degraded resolves");
+        assert_eq!(status, Status::Connected);
+        assert_eq!(notice, "No microphone.");
+
+        assert_eq!(
+            Media::Failed("nope".into()).resolve(),
+            Some((Status::Failed, "nope".into()))
+        );
+        // Absent leaves the session's own answer alone.
+        assert_eq!(Media::Absent.resolve(), None);
+    }
+
+    #[test]
+    fn the_media_state_defaults_to_absent() {
+        // Absent is not an error: a build without the feature has a working
+        // control plane and says so.
+        assert_eq!(Media::default(), Media::Absent);
+        assert_eq!(NoMedia.media(), Media::Absent);
     }
 
     #[test]

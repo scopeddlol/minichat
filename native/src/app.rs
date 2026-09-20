@@ -546,6 +546,14 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
                     state_ref.speaking.clear();
                     dirty = true;
                 }
+
+                // Where the media engine got to. Polled with the speakers
+                // rather than pushed, because the engine runs on its own
+                // runtime and this is the one place per frame that the store
+                // is already borrowed.
+                if state_ref.voice.status != crate::voice::Status::Disconnected {
+                    dirty |= follow_media(&mut state_ref);
+                }
             }
 
             for action in tray_handle.as_ref().map(|t| t.poll()).unwrap_or_default() {
@@ -1516,9 +1524,11 @@ fn handle_event(
             state_ref.voice.joining(&channel, &grant);
             let muted = state_ref.voice.muted;
 
+            // Returns at once; the room connects on its own thread and the
+            // pump below follows it through `engine.media()`.
             let outcome = state_ref.engine.connect(&grant, muted);
             state_ref.voice.status = match outcome {
-                Ok(()) if crate::voice::has_media() => crate::voice::Status::Connected,
+                Ok(()) if crate::voice::has_media() => crate::voice::Status::Connecting,
                 // The control plane joined; this build has no media. Not an
                 // error — the member is in the channel and visible to
                 // everyone else.
@@ -1725,6 +1735,24 @@ fn emoji_rows(entries: Vec<ui::EmojiEntry>) -> Vec<ui::EmojiRow> {
             entries: ModelRc::new(VecModel::from(chunk.to_vec())),
         })
         .collect()
+}
+
+/// Fold the media engine's state into the voice session.
+///
+/// Returns true when the UI needs rebuilding.
+fn follow_media(state: &mut AppState) -> bool {
+    // `None` is a build without media, which the join path has already put
+    // in ControlOnly; leaving that alone is what keeps it honest.
+    let Some((status, notice)) = state.engine.media().resolve() else {
+        return false;
+    };
+
+    if state.voice.status == status && state.voice.notice == notice {
+        return false;
+    }
+    state.voice.status = status;
+    state.voice.notice = notice;
+    true
 }
 
 /// Act on a global hotkey. Returns true when the UI needs rebuilding.

@@ -117,7 +117,13 @@ Connect to an instance, sign in, and:
 - Inline message editing, file attachments through the native picker, and
   scroll-back pagination
 - Voice channels: join, leave, mute, deafen, who is in the room and who is
-  speaking. Audio itself needs the `voice` feature — see below
+  speaking, and the audio itself with the `voice` feature — see below
+- Direct calls: ringing, answering, declining and hanging up
+- An admin panel: overview, instance settings, members, roles, invites, bans
+  and the audit log, each section gated on the permission it needs
+- Friends and blocking, message forwarding, an image lightbox, and channel
+  and category reordering by drag
+- Global voice hotkeys on Windows and macOS: push to talk, mute, deafen
 - Desktop notifications, honouring the member's per-channel preferences
 - A tray icon with the same menu the Tauri shell has, and close-to-tray
 - Keyboard shortcuts: Ctrl/Cmd+K and Ctrl/Cmd+F to search, Alt+Up and
@@ -126,8 +132,8 @@ Connect to an instance, sign in, and:
   whatever is open
 - Frameless window with its own caption bar, matching the Tauri shell's
 
-Not yet: **voice and video media** (see below), the admin panel, direct
-calls, and global hotkeys that work while the app is in the background.
+Not yet: **camera and screen share**. Both need I420 frame rendering, which
+the UI has no path for yet; voice audio works (see below).
 
 ## Testing
 
@@ -145,6 +151,11 @@ Two kinds of check exist because unit tests cannot see two kinds of bug:
 - `tests/live.sh` starts a real server, sets an instance up, seeds it, and has
   the client sign in, read the gateway and render. Every other test would pass
   against a server that changed the shape of READY.
+- `tests/voice.sh` starts a real LiveKit server, joins it with the media
+  engine, and watches from a second participant in the room: the microphone
+  track is published, subscribed by someone else, muted, and the participant
+  leaves. Audio going out is the one thing the control plane can never prove
+  about itself.
 
 Note for anyone extending the UI tests: a `draw_if_needed` whose closure
 ignores the renderer settles nothing. Slint evaluates properties lazily during
@@ -177,30 +188,61 @@ measurement. And it is a small instance with a handful of messages and no
 images loaded; the caps in `store.rs` and `images.rs` are what keep a busy one
 from being a different story.
 
-Note that once voice lands,
-libwebrtc comes with it and a client *in a call* will be in the hundreds
-whatever the UI toolkit — WebRTC is WebRTC. The win is concentrated in the
-idle case, which is the case being complained about.
+Note that a client built with the `voice` feature carries libwebrtc, and one
+*in a call* will be in the hundreds of megabytes whatever the UI toolkit —
+WebRTC is WebRTC. The win is concentrated in the idle case, which is the case
+being complained about.
+
+## Voice
+
+Audio is behind the `voice` feature:
+
+```
+cargo build --features voice
+```
+
+That pulls in `livekit` and, under it, roughly 200MB of prebuilt libwebrtc.
+Linking it on Linux needs **clang 21 or newer** — the hermetic libc++ the
+artifact ships with requires it, and Ubuntu 24.04 tops out at 18, so a Linux
+build wants a toolchain from apt.llvm.org. Windows links against MSVC and has
+no such constraint. The feature is off by default so that everything else in
+this client — the whole control plane included — builds, tests and ships
+without a C++ toolchain.
+
+Capture and playback are libwebrtc's own audio device module, which
+`PlatformAudio` switches on: WASAPI on Windows, CoreAudio on macOS,
+PulseAudio or ALSA on Linux. Pushing frames in by hand through
+`NativeAudioSource` was the alternative, and it would have meant
+reimplementing echo cancellation badly — acoustic echo cancellation needs the
+render stream as its reference, and a client that only sees its own capture
+buffer does not have it. The platform module has both sides and uses the
+hardware canceller where the machine has one.
+
+Three things worth knowing about the shape of it:
+
+- **Joining never blocks the UI thread.** `Engine::connect` starts the room
+  on a runtime of its own and returns; the frame pump follows it through
+  `Engine::media`. The runtime is kept alive between calls, so hanging up
+  does not wait on a socket either.
+- **Muting stops the recording, not just the track.** The track mute is what
+  tells everyone else; stopping the platform recording is what turns off the
+  operating system's own microphone indicator. A client that says muted while
+  the system says live is a client nobody believes.
+- **Deafening unsubscribes.** Turning playback down would still pull every
+  stream over the network and decode it. Unsubscribing tells the server to
+  stop sending.
+
+A build without the feature still joins voice channels: you appear in the
+room, you see who else is there and who is speaking, and the client says
+plainly that it carries no audio rather than pretending the join failed.
 
 ## Outstanding
 
-- **Voice and video media.** The control plane is done — joining, leaving,
-  the room's membership, mute and deafen, the sidebar panel. What is missing
-  is the audio itself: `src/voice.rs` defines the `Engine` trait and says
-  exactly what an implementation has to do, in the order the join path calls
-  it. Beyond that trait: I420 frame rendering for camera and screen share,
-  device enumeration and hot-plug, and the audio processing module (echo
-  cancellation, gain, noise suppression).
-
-  Build it with `cargo build --features voice`. That pulls in `livekit` and,
-  under it, roughly 200MB of prebuilt libwebrtc. The artifact downloads
-  cleanly; linking it on Linux needs **clang 21 or newer**, because the
-  hermetic libc++ it ships with requires it. Ubuntu 24.04 tops out at clang
-  18, so a Linux build needs a toolchain from apt.llvm.org. Windows links
-  against MSVC and has no such constraint.
-
-  This is the largest remaining piece by a wide margin, and it is where the
-  schedule will be decided.
+- **Camera and screen share.** Voice audio works; video does not. Both need
+  I420 frames rendered into the UI, which Slint has no path for short of
+  converting each frame to RGB and handing it over as an image — workable,
+  not free, and not yet written. The screen-capture half already exists in
+  `desktop/src/capture.rs`.
 - **The session token is a plain file.** `src/settings.rs` writes it
   user-only where the platform allows, which is no worse than the web
   client's `localStorage`, but it is not the OS credential store and should

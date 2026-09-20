@@ -165,8 +165,10 @@ WebView2 shell holds several hundred, and ships as one binary with no runtime to
 install beside it.
 
 It covers channels, messages, direct messages, voice, search, administration and
-the rest of the daily surface. The Tauri installer below remains the released
-build until the native one has been through accessibility testing on Windows.
+the rest of the daily surface. Voice audio is behind a `voice` build feature,
+because it carries libwebrtc and wants clang 21 to link; everything else builds
+without a C++ toolchain. The Tauri installer below remains the released build
+until the native one has been through accessibility testing on Windows.
 
 ### Windows desktop app
 
