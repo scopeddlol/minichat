@@ -112,7 +112,7 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: native
         run: |
-          for overlay in "" settings profile emoji menu search; do
+          for overlay in "" settings profile emoji menu search inbox editing attaching scrolled; do
             if [ -z "$overlay" ]; then
               ./target/release/minichat-native --screenshot "shot-chat.png" 1180 820
             else

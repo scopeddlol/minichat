@@ -606,6 +606,7 @@ export component App inherits Window {
                 }
                 scroll-to-newest: root.scroll-to-newest;
                 focus-composer: root.focus-composer;
+                scroll-distance: root.scroll-distance;
             }
 
             if root.side-panel != SidePanelKind.none && !root.inbox-open: SidePanel {
@@ -713,5 +714,6 @@ export component App inherits Window {
     /// Bumped to put the caret back in the composer — after a channel
     /// change, after a dialog closes, and when the window is first shown.
     in property <int> focus-composer;
+    in property <length> scroll-distance;
 
 }

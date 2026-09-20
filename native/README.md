@@ -121,11 +121,34 @@ Connect to an instance, sign in, and:
 - A tray icon with the same menu the Tauri shell has, and close-to-tray
 - Keyboard shortcuts: Ctrl/Cmd+K and Ctrl/Cmd+F to search, Alt+Up and
   Alt+Down to walk channels, Ctrl/Cmd+Shift+M and +D for mute and deafen,
-  Escape to back out of whatever is open
+  Enter to send and Shift+Enter for a newline, Escape to back out of
+  whatever is open
 - Frameless window with its own caption bar, matching the Tauri shell's
 
 Not yet: **voice and video media** (see below), the admin panel, direct
 calls, and global hotkeys that work while the app is in the background.
+
+## Testing
+
+`cargo test` covers the parts that have an answer worth pinning: the oklab
+palette, the markdown grammar and its precedence, the flow layout's wrapping
+and decorations, the permission bits, the store's gateway handling, the
+notification rules.
+
+Two kinds of check exist because unit tests cannot see two kinds of bug:
+
+- `src/uitest.rs` builds the real window headlessly, dispatches real key
+  events and asserts on what came out. It exists because binding send to
+  `TextInput.accepted` compiled, rendered, and silently never sent anything —
+  Slint only raises that callback on a single-line input.
+- `tests/live.sh` starts a real server, sets an instance up, seeds it, and has
+  the client sign in, read the gateway and render. Every other test would pass
+  against a server that changed the shape of READY.
+
+Note for anyone extending the UI tests: a `draw_if_needed` whose closure
+ignores the renderer settles nothing. Slint evaluates properties lazily during
+a render pass and `changed` handlers run as part of it, so the harness has to
+render for real.
 
 ## Memory
 

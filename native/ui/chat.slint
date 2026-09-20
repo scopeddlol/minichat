@@ -29,6 +29,8 @@ export component ChatPane {
     /// surrounding scope can reach.
     in property <int> scroll-to-newest;
     in property <int> focus-composer;
+    /// How far the newest message is below the fold, from the last scroll.
+    in property <length> scroll-distance;
 
     callback send(string);
     callback cancel-reply();
@@ -183,6 +185,51 @@ export component ChatPane {
                     font-size: 13.5px;
                     horizontal-alignment: center;
                     wrap: word-wrap;
+                }
+            }
+
+            // "Jump to present", shown once the newest message is off
+            // screen. Without it a reader who has scrolled back has to drag
+            // all the way down again.
+            //
+            // A fixed width rather than one derived from the label: deriving
+            // it would make the button's width depend on a layout inside the
+            // button, which depends on the button's width.
+            if root.scroll-distance > 200px: Rectangle {
+                x: parent.width - self.width - 24px;
+                y: parent.height - self.height - 14px;
+                width: 168px;
+                height: 34px;
+                border-radius: 17px;
+                background: pounce.has-hover ? Theme.surface-3 : Theme.surface-2;
+                border-width: 1px;
+                border-color: Theme.border;
+                animate background { duration: Theme.normal; }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: center;
+                    padding-left: 14px;
+                    padding-right: 14px;
+
+                    Icon {
+                        data: Icons.arrow-down;
+                        size: 15px;
+                        colour: Theme.text-muted;
+                        y: (parent.height - self.height) / 2;
+                    }
+                    Text {
+                        text: "Jump to present";
+                        color: Theme.text;
+                        font-size: 12.3px;
+                        font-weight: 560;
+                        vertical-alignment: center;
+                    }
+                }
+
+                pounce := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.scroll-to-bottom(); }
                 }
             }
 

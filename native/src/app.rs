@@ -1823,6 +1823,7 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
 
     app.set_scroll_to_newest(state_ref.scroll_token);
     app.set_focus_composer(state_ref.focus_token);
+    app.set_scroll_distance(state_ref.scroll_distance);
 
     queue_images(&state_ref, tasks);
 }

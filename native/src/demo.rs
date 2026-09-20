@@ -403,6 +403,10 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             app.set_direct_messages(app.get_messages());
             app.set_loading_direct(false);
         }
+        "scrolled" => {
+            // Scrolled back, so the jump-to-present button is in the frame.
+            app.set_scroll_distance(420.0);
+        }
         "attaching" => {
             let file = |id: &str, name: &str, size: &str, kind: &str| ui::PendingAttachment {
                 id: id.into(),
