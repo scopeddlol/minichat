@@ -143,7 +143,12 @@ jobs:
           desktop-file-validate /usr/share/applications/minichat.desktop
           test -f /usr/share/icons/hicolor/128x128/apps/minichat.png
           sudo apt-get remove -y minichat
-          ! command -v minichat-native
+          # On the files, not on `command -v`: bash caches the location of a
+          # command it has run, and goes on reporting it after the file is
+          # gone. The package removes correctly; the check did not.
+          test ! -e /usr/bin/minichat-native
+          test ! -e /usr/share/applications/minichat.desktop
+          test ! -e /usr/share/icons/hicolor/128x128/apps/minichat.png
 
       - name: Run the AppImage
         if: runner.os == 'Linux'
