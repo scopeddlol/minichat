@@ -588,7 +588,12 @@ export component Lightbox {
     }
 
     // Filename and the way out, along the top.
+    //
+    // `y` is set because Slint centres an element that does not set it, which
+    // put this bar across the middle of the picture.
     Rectangle {
+        y: 0;
+        width: 100%;
         height: 56px;
         background: #00000066;
         HorizontalLayout {

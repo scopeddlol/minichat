@@ -514,6 +514,29 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             ])));
             app.set_blocked_members(ModelRc::new(VecModel::from(vec![person(1, 0)])));
         }
+        // Rendered from a gradient rather than a file: what is being checked
+        // is that the lightbox lays out over the window at all, and a demo
+        // that needed an attachment on disk would not run in CI.
+        "lightbox" => {
+            let (width, height) = (960u32, 600u32);
+            let mut pixels = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
+            let stride = width as usize;
+            for (index, pixel) in pixels.make_mut_slice().iter_mut().enumerate() {
+                let x = (index % stride) as f32 / width as f32;
+                let y = (index / stride) as f32 / height as f32;
+                *pixel = slint::Rgba8Pixel {
+                    r: (40.0 + 150.0 * x) as u8,
+                    g: (60.0 + 90.0 * y) as u8,
+                    b: (120.0 + 110.0 * (1.0 - x)) as u8,
+                    a: 255,
+                };
+            }
+            app.set_lightbox_picture(slint::Image::from_rgba8(pixels));
+            app.set_lightbox_filename("flow-layout.png".into());
+            app.set_lightbox_caption("960 \u{00d7} 600 \u{00b7} 214 KB".into());
+            app.set_overlay(ui::Overlay::Lightbox);
+        }
+
         "forward" => {
             let rows = app.get_messages();
             if let Some(row) = rows.row_data(3) {
