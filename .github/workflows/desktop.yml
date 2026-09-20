@@ -82,25 +82,53 @@ jobs:
         shell: pwsh
         working-directory: desktop
         run: |
+          function Show-Tree($label, $path) {
+              Write-Host "--- $label ($path)"
+              if (Test-Path $path) {
+                  Get-ChildItem $path -Recurse -ErrorAction SilentlyContinue |
+                      Select-Object -First 40 -ExpandProperty FullName |
+                      ForEach-Object { Write-Host "    $_" }
+              } else {
+                  Write-Host "    (does not exist)"
+              }
+          }
+
           $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe |
               Select-Object -First 1
           $instance = 'https://chat.example.com'
           Write-Host "running $($setup.Name) /S /INSTANCE=$instance"
-          Start-Process -FilePath $setup.FullName `
-              -ArgumentList '/S', "/INSTANCE=$instance" -Wait
+          $run = Start-Process -FilePath $setup.FullName `
+              -ArgumentList '/S', "/INSTANCE=$instance" -Wait -PassThru
+          $run.WaitForExit()
+          Write-Host "installer exited with $($run.ExitCode)"
 
+          # Give the installer a moment to finish flushing before looking:
+          # a silent NSIS run can return while the last writes land.
+          $exe = "$env:LOCALAPPDATA\MiniChat\MiniChat.exe"
           $settings = "$env:APPDATA\chat.mini.desktop\settings.json"
+          for ($i = 0; $i -lt 30; $i++) {
+              if ((Test-Path $exe) -and (Test-Path $settings)) { break }
+              Start-Sleep 1
+          }
+
+          if (-not (Test-Path $exe)) {
+              Show-Tree "LOCALAPPDATA" $env:LOCALAPPDATA
+              throw "the installer did not put MiniChat.exe at $exe"
+          }
+          Write-Host "installed: $exe"
+
           if (-not (Test-Path $settings)) {
-              throw "the installer did not write $settings"
+              # Where the hook's own idea of %APPDATA% ended up, if anywhere.
+              foreach ($root in $env:APPDATA, $env:LOCALAPPDATA, $env:PROGRAMDATA) {
+                  Show-Tree "chat.mini.desktop" "$root\chat.mini.desktop"
+              }
+              throw "the /INSTANCE hook did not write $settings"
           }
           $saved = (Get-Content $settings -Raw | ConvertFrom-Json).instance_url
           if ($saved -ne $instance) {
               throw "settings.json says '$saved', expected '$instance'"
           }
           Write-Host "instance address seeded: $saved"
-
-          $exe = "$env:LOCALAPPDATA\MiniChat\MiniChat.exe"
-          if (-not (Test-Path $exe)) { throw "MiniChat.exe is not at $exe" }
 
       - name: Uninstall, and check it kept the settings
         shell: pwsh
