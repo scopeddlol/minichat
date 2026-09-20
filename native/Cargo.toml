@@ -72,6 +72,11 @@ voice = ["dep:livekit"]
 # client does not have and does not want for one icon.
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 tray-icon = "0.19"
+# Push-to-talk has to work while MiniChat is in the background — that is the
+# whole point of it — which an in-app key handler cannot do. Same platforms
+# as the tray, for the same reason: the Linux backend wants X11 or a
+# compositor protocol this client does not otherwise depend on.
+global-hotkey = "0.6"
 
 [build-dependencies]
 slint-build = "1.18"

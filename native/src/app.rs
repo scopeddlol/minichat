@@ -505,6 +505,16 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
     // the tray.
     let tray = crate::tray::Tray::new(state.borrow().settings.close_to_tray);
 
+    // Global voice hotkeys, registered with the desktop so push-to-talk
+    // works with the window in the background. Moved into the pump, which
+    // holds them for the life of the app.
+    // Shared with the settings callback rather than owned by the pump alone,
+    // so turning hotkeys off re-registers at once instead of at next launch.
+    let hotkeys = Rc::new(RefCell::new(crate::hotkeys::Hotkeys::new()));
+    if let Some(hotkeys) = hotkeys.borrow_mut().as_mut() {
+        hotkeys.apply(&state.borrow().settings.hotkeys);
+    }
+
     // Events come back on the runtime thread and are drained here, on the UI
     // thread, where the store lives.
     let pump = {
@@ -512,6 +522,7 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         let state = state.clone();
         let tasks = task_tx.clone();
         let tray_handle = tray;
+        let hotkey_handle = hotkeys.clone();
         move || {
             let Some(app) = weak.upgrade() else { return };
             let mut dirty = false;
@@ -541,6 +552,15 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
                 dirty |= handle_tray(action, &app, &state, &tasks, tray_handle.as_ref());
             }
 
+            let pressed = hotkey_handle
+                .borrow()
+                .as_ref()
+                .map(|h| h.poll())
+                .unwrap_or_default();
+            for action in pressed {
+                dirty |= handle_hotkey(action, &state);
+            }
+
             if dirty {
                 refresh(&app, &state, &tasks);
             }
@@ -556,7 +576,7 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         pump,
     );
 
-    wire_callbacks(&app, &state, &task_tx);
+    wire_callbacks(&app, &state, &task_tx, &hotkeys);
 
     // Open straight into the saved instance when there is a saved session,
     // otherwise show the connect screen.
@@ -1707,6 +1727,47 @@ fn emoji_rows(entries: Vec<ui::EmojiEntry>) -> Vec<ui::EmojiRow> {
         .collect()
 }
 
+/// Act on a global hotkey. Returns true when the UI needs rebuilding.
+///
+/// Nothing happens when there is no voice connection: a push-to-talk key
+/// pressed while not in a call should do nothing, not silently arm something
+/// for the next one.
+fn handle_hotkey(action: crate::hotkeys::Action, state: &Shared) -> bool {
+    let mut state_ref = state.borrow_mut();
+    if !state_ref.voice.is_live() {
+        return false;
+    }
+
+    match action {
+        crate::hotkeys::Action::PushToTalk(held) => {
+            if !state_ref.voice.can_speak {
+                return false;
+            }
+            // Held open, closed on release — the opposite of a toggle, and
+            // the reason it is a hold at all.
+            state_ref.voice.set_muted(!held);
+            let muted = state_ref.voice.muted;
+            state_ref.engine.set_muted(muted);
+        }
+        crate::hotkeys::Action::ToggleMute => {
+            let next = !state_ref.voice.muted;
+            state_ref.voice.set_muted(next);
+            let muted = state_ref.voice.muted;
+            let deafened = state_ref.voice.deafened;
+            state_ref.engine.set_muted(muted);
+            state_ref.engine.set_deafened(deafened);
+        }
+        crate::hotkeys::Action::ToggleDeafen => {
+            let next = !state_ref.voice.deafened;
+            state_ref.voice.set_deafened(next);
+            let muted = state_ref.voice.muted;
+            state_ref.engine.set_deafened(next);
+            state_ref.engine.set_muted(muted);
+        }
+    }
+    true
+}
+
 /// Act on a tray menu choice. Returns true when the UI needs rebuilding.
 fn handle_tray(
     action: crate::tray::Action,
@@ -2135,6 +2196,17 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
     // --- settings ------------------------------------------------------------
     app.set_my_username(store.me.member.username.clone().into());
     app.set_instance_version(store.instance.version.clone().into());
+    app.set_hotkeys_available(crate::hotkeys::available());
+    app.set_hotkeys_enabled(state_ref.settings.hotkeys.enabled);
+    app.set_hotkey_summary(
+        format!(
+            "Push to talk {} \u{b7} Mute {} \u{b7} Deafen {}",
+            state_ref.settings.hotkeys.push_to_talk,
+            state_ref.settings.hotkeys.mute,
+            state_ref.settings.hotkeys.deafen,
+        )
+        .into(),
+    );
     app.set_theme_choice(match state_ref.settings.theme {
         ThemeChoice::Dark => 0,
         ThemeChoice::Light => 1,
@@ -2580,7 +2652,12 @@ fn refresh_admin(app: &ui::App, state: &AppState, accent: Rgb) {
     )));
 }
 
-fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
+fn wire_callbacks(
+    app: &ui::App,
+    state: &Shared,
+    tasks: &mpsc::UnboundedSender<Task>,
+    hotkeys: &Rc<RefCell<Option<crate::hotkeys::Hotkeys>>>,
+) {
     macro_rules! handler {
         ($app:expr, $state:expr, $tasks:expr, |$a:ident, $s:ident, $t:ident| $body:block) => {{
             let weak: Weak<ui::App> = $app.as_weak();
@@ -3996,6 +4073,29 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             theme::apply(&app, &palette);
             // Author names and the fallback avatar colours are derived from
             // the palette, so the whole view is rebuilt rather than retinted.
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_set_hotkeys({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        let hotkeys = hotkeys.clone();
+        move |enabled| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            state_ref.settings.hotkeys.enabled = enabled;
+            let _ = state_ref.settings.store();
+            let bindings = state_ref.settings.hotkeys.clone();
+            drop(state_ref);
+
+            // Re-registered at once rather than at the next launch: a
+            // setting that only takes effect after a restart is a setting
+            // people assume is broken.
+            if let Some(control) = hotkeys.borrow_mut().as_mut() {
+                control.apply(&bindings);
+            }
             refresh(&app, &state, &tasks);
         }
     });

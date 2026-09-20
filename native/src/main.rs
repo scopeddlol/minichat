@@ -7,6 +7,7 @@ mod fonts;
 mod format;
 mod forward;
 mod gateway;
+mod hotkeys;
 mod images;
 mod live;
 mod notify;

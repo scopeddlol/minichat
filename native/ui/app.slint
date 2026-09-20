@@ -354,6 +354,10 @@ export component App inherits Window {
 
     in-out property <string> status-draft;
     in property <int> theme-choice;
+    in property <bool> hotkeys-available;
+    in property <bool> hotkeys-enabled;
+    in property <string> hotkey-summary;
+    callback set-hotkeys(bool);
     in property <string> instance-version;
     in property <string> my-username;
 
@@ -799,6 +803,10 @@ export component App inherits Window {
         status-draft <=> root.status-draft;
         theme-choice: root.theme-choice;
         members-open: root.members-open;
+        hotkeys-available: root.hotkeys-available;
+        hotkeys-enabled: root.hotkeys-enabled;
+        hotkey-summary: root.hotkey-summary;
+        set-hotkeys(on) => { root.set-hotkeys(on); }
         dismissed => { root.dismiss-overlay(); }
         choose-theme(index) => { root.choose-theme(index); }
         save-status(text) => { root.save-status(text); }

@@ -161,9 +161,14 @@ export component SettingsDialog {
     /// 0 dark, 1 light, 2 follow the instance.
     in property <int> theme-choice;
     in property <bool> members-open;
+    in property <bool> hotkeys-available;
+    in property <bool> hotkeys-enabled;
+    /// "Push to talk F8 · Mute F9 · Deafen F10".
+    in property <string> hotkey-summary;
 
     callback dismissed();
     callback choose-theme(int);
+    callback set-hotkeys(bool);
     callback save-status(string);
     callback sign-out();
     callback switch-instance();
@@ -173,7 +178,7 @@ export component SettingsDialog {
         height: root.height;
         title: "Settings";
         dialog-width: 540px;
-        dialog-height: 520px;
+        dialog-height: 560px;
         dismissed => { root.dismissed(); }
 
         Flickable {
@@ -237,6 +242,27 @@ export component SettingsDialog {
                         selected: root.theme-choice;
                         y: (parent.height - self.height) / 2;
                         chose(index) => { root.choose-theme(index); }
+                    }
+                }
+
+                Rectangle { height: 20px; }
+                Divider {}
+                Rectangle { height: 12px; }
+
+                FieldLabel { text: "VOICE HOTKEYS"; }
+                Rectangle { height: 6px; }
+                SettingRow {
+                    label: "Global hotkeys";
+                    detail: root.hotkeys-available
+                        ? root.hotkey-summary
+                        : "Windows and macOS only \u{2014} this build has no desktop hotkey backend.";
+                    // No switch at all where the keys cannot be registered:
+                    // a control that does nothing is worse than none.
+                    if root.hotkeys-available: Segmented {
+                        options: ["Off", "On"];
+                        selected: root.hotkeys-enabled ? 1 : 0;
+                        y: (parent.height - self.height) / 2;
+                        chose(index) => { root.set-hotkeys(index == 1); }
                     }
                 }
 
@@ -630,7 +656,7 @@ export component ForwardDialog {
         height: root.height;
         title: "Forward message";
         dialog-width: 460px;
-        dialog-height: 520px;
+        dialog-height: 560px;
         dismissed => { root.dismissed(); }
 
         VerticalLayout {

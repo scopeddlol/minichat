@@ -290,6 +290,11 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             app.set_my_username("ada".into());
             app.set_instance_version("0.5.0".into());
             app.set_theme_choice(0);
+            // The demo shows the control a Windows or macOS build gets; a
+            // Linux build reports the truth through `hotkeys::available()`.
+            app.set_hotkeys_available(true);
+            app.set_hotkeys_enabled(true);
+            app.set_hotkey_summary("Push to talk F8 \u{b7} Mute F9 \u{b7} Deafen F10".into());
             app.set_overlay(ui::Overlay::Settings);
         }
         "profile" => {
@@ -424,7 +429,7 @@ pub fn show_overlay(app: &ui::App, which: &str) {
                 value: value.into(),
                 detail: detail.into(),
             };
-            let tiles = vec![
+            let tiles = [
                 tile("MEMBERS", "5", "4 online"),
                 tile("MESSAGES", "1,284", "96 this week"),
                 tile("CHANNELS", "6", ""),

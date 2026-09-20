@@ -19,6 +19,41 @@ pub enum ThemeChoice {
     Instance,
 }
 
+/// Global voice hotkeys, in the same accelerator syntax the Tauri shell
+/// stores, so a member moving between the two clients keeps their bindings.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct HotkeyBindings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_ptt")]
+    pub push_to_talk: String,
+    #[serde(default = "default_mute")]
+    pub mute: String,
+    #[serde(default = "default_deafen")]
+    pub deafen: String,
+}
+
+fn default_ptt() -> String {
+    "F8".into()
+}
+fn default_mute() -> String {
+    "F9".into()
+}
+fn default_deafen() -> String {
+    "F10".into()
+}
+
+impl Default for HotkeyBindings {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            push_to_talk: default_ptt(),
+            mute: default_mute(),
+            deafen: default_deafen(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Settings {
     /// The instance opened on launch. `None` shows the connect screen.
@@ -53,6 +88,9 @@ pub struct Settings {
     /// The same setting the Tauri shell keeps, under the same name.
     #[serde(default = "default_true")]
     pub close_to_tray: bool,
+
+    #[serde(default)]
+    pub hotkeys: HotkeyBindings,
 }
 
 fn default_true() -> bool {
@@ -73,6 +111,7 @@ impl Default for Settings {
             members_open: default_true(),
             last_channel: None,
             close_to_tray: default_true(),
+            hotkeys: HotkeyBindings::default(),
         }
     }
 }
@@ -162,6 +201,17 @@ mod tests {
     }
 
     #[test]
+    fn the_hotkey_defaults_match_the_tauri_shells() {
+        // A member moving between the two clients should find the same keys
+        // doing the same things.
+        let bindings = HotkeyBindings::default();
+        assert_eq!(bindings.push_to_talk, "F8");
+        assert_eq!(bindings.mute, "F9");
+        assert_eq!(bindings.deafen, "F10");
+        assert!(bindings.enabled);
+    }
+
+    #[test]
     fn a_partial_file_keeps_the_defaults_for_what_is_missing() {
         let settings: Settings =
             serde_json::from_str(r#"{"instance_url":"https://chat.example.com"}"#).unwrap();
@@ -210,6 +260,7 @@ mod tests {
             members_open: false,
             last_channel: Some("general".into()),
             close_to_tray: false,
+            hotkeys: HotkeyBindings::default(),
         };
         let restored: Settings =
             serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
