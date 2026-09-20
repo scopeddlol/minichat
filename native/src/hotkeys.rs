@@ -90,7 +90,9 @@ mod platform {
 
     pub struct Hotkeys {
         manager: GlobalHotKeyManager,
-        registered: Vec<(u32, Action)>,
+        /// The keys themselves rather than their ids: unregistering takes
+        /// the `HotKey`, and the id is on it.
+        registered: Vec<(HotKey, Action)>,
     }
 
     impl Hotkeys {
@@ -106,8 +108,8 @@ mod platform {
         /// Every failure is non-fatal: a key another application already
         /// owns should cost you that key, not the whole set.
         pub fn apply(&mut self, bindings: &HotkeyBindings) {
-            for (id, _) in self.registered.drain(..) {
-                let _ = self.manager.unregister_by_id(id);
+            for (key, _) in self.registered.drain(..) {
+                let _ = self.manager.unregister(key);
             }
             if !bindings.enabled {
                 return;
@@ -125,7 +127,7 @@ mod platform {
                     continue;
                 };
                 match self.manager.register(key) {
-                    Ok(()) => self.registered.push((key.id(), action)),
+                    Ok(()) => self.registered.push((key, action)),
                     Err(error) => {
                         eprintln!("minichat: could not register '{accelerator}': {error}")
                     }
@@ -138,7 +140,7 @@ mod platform {
         pub fn poll(&self) -> Vec<Action> {
             let mut out = Vec::new();
             while let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
-                let Some((_, action)) = self.registered.iter().find(|(id, _)| *id == event.id)
+                let Some((_, action)) = self.registered.iter().find(|(key, _)| key.id == event.id)
                 else {
                     continue;
                 };
