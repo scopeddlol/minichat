@@ -21,9 +21,15 @@ pub enum ApiError {
     /// The request never reached the server.
     #[error("Could not reach the server. Check your connection.")]
     Unreachable,
-    /// The session is gone; the UI signs out rather than retrying.
-    #[error("Sign in again. Your session was rejected.")]
-    Unauthorised,
+    /// Refused for want of credentials: a wrong password at sign-in, or a
+    /// session the instance no longer honours.
+    ///
+    /// Carries what the server said, because the two cases are not the same
+    /// sentence. "Incorrect username or password." is the answer to one of
+    /// them, and telling someone their session expired while they are trying
+    /// to start one is no answer at all.
+    #[error("{0}")]
+    Unauthorised(String),
     #[error("{0}")]
     Server(String),
     #[error("{0}")]
@@ -32,7 +38,7 @@ pub enum ApiError {
 
 impl ApiError {
     pub fn is_unauthorised(&self) -> bool {
-        matches!(self, Self::Unauthorised)
+        matches!(self, Self::Unauthorised(_))
     }
 }
 
@@ -204,14 +210,17 @@ impl Client {
         let text = response.text().await.unwrap_or_default();
 
         if !status.is_success() {
-            if status == StatusCode::UNAUTHORIZED {
-                return Err(ApiError::Unauthorised);
-            }
             let detail = serde_json::from_str::<serde_json::Value>(&text)
                 .ok()
-                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_owned))
-                .unwrap_or_else(|| format!("Request failed ({})", status.as_u16()));
-            return Err(ApiError::Server(detail));
+                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_owned));
+            if status == StatusCode::UNAUTHORIZED {
+                return Err(ApiError::Unauthorised(detail.unwrap_or_else(|| {
+                    "Sign in again. Your session was rejected.".into()
+                })));
+            }
+            return Err(ApiError::Server(detail.unwrap_or_else(|| {
+                format!("Request failed ({})", status.as_u16())
+            })));
         }
 
         serde_json::from_str(&text)
@@ -571,14 +580,17 @@ impl Client {
         let text = response.text().await.unwrap_or_default();
 
         if !status.is_success() {
-            if status == StatusCode::UNAUTHORIZED {
-                return Err(ApiError::Unauthorised);
-            }
             let detail = serde_json::from_str::<serde_json::Value>(&text)
                 .ok()
-                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_owned))
-                .unwrap_or_else(|| format!("Upload failed ({})", status.as_u16()));
-            return Err(ApiError::Server(detail));
+                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_owned));
+            if status == StatusCode::UNAUTHORIZED {
+                return Err(ApiError::Unauthorised(detail.unwrap_or_else(|| {
+                    "Sign in again. Your session was rejected.".into()
+                })));
+            }
+            return Err(ApiError::Server(
+                detail.unwrap_or_else(|| format!("Upload failed ({})", status.as_u16())),
+            ));
         }
 
         serde_json::from_str(&text)

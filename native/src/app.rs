@@ -472,6 +472,18 @@ impl AppState {
 type Shared = Rc<RefCell<AppState>>;
 
 pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
+    run_with(settings, None)
+}
+
+/// The client, optionally with something driving it.
+///
+/// The probe is how the sign-in screen is checked against a real server: it
+/// needs the whole client — callbacks, task queue, network thread, events
+/// coming back — and the only honest way to have that is to run it.
+pub fn run_with(
+    settings: Settings,
+    probe: Option<&crate::probe::SignIn>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let app = ui::App::new()?;
     let state: Shared = Rc::new(RefCell::new(AppState::new(settings.clone())));
 
@@ -595,7 +607,11 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         drop(state_ref);
 
         theme::apply(&app, &state.borrow().palette);
-        if let Some(origin) = state.borrow().settings.instance_url.clone() {
+        // `saved` rather than a second read: a `state.borrow()` in the
+        // scrutinee of an `if let` lives until the end of its block, so
+        // borrowing mutably inside the body panics — which it did, on every
+        // launch that had an instance to open.
+        if let Some(origin) = saved.clone() {
             state.borrow_mut().origin = origin;
         }
         match (saved, token) {
@@ -616,6 +632,10 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+    }
+
+    if let Some(probe) = probe {
+        probe.attach(&app);
     }
 
     app.run()?;

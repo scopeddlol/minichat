@@ -95,6 +95,11 @@ global-hotkey = "0.6"
 [build-dependencies]
 slint-build = "1.18"
 
+# The icon and version stamped into the .exe. Windows only, and only at
+# build time; see build.rs.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [profile.release]
 opt-level = "s"
 lto = true

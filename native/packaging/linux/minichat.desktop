@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MiniChat
+GenericName=Chat
+Comment=Voice and text chat for one self-hosted community
+Exec=minichat-native %U
+Icon=minichat
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=chat;voice;community;self-hosted;
+StartupWMClass=minichat-native

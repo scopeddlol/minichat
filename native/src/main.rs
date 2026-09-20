@@ -12,6 +12,7 @@ mod images;
 mod live;
 mod notify;
 mod perms;
+mod probe;
 mod reorder;
 mod screenshot;
 mod settings;
@@ -70,6 +71,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // `--live <origin> <user> <pass> [out.png]` signs in to a real instance
     // and renders what it sent. See src/live.rs.
+    // `--signin <origin> <username> <password>`: the real sign-in screen,
+    // driven against a real server without a display. What `--live` checks
+    // is the API client; this checks the client.
+    if let Some(index) = args.iter().position(|a| a == "--signin") {
+        let origin = args.get(index + 1).cloned().unwrap_or_default();
+        let username = args.get(index + 2).cloned().unwrap_or_default();
+        let password = args.get(index + 3).cloned().unwrap_or_default();
+        if origin.is_empty() || username.is_empty() {
+            eprintln!("usage: minichat-native --signin <origin> <username> <password>");
+            std::process::exit(2);
+        }
+
+        let quit = probe::headless(1180, 820)?;
+        fonts::register();
+        let probe = probe::SignIn::new(
+            &username,
+            &password,
+            std::time::Duration::from_secs(45),
+            quit,
+        );
+
+        // Pointed at the instance, so the client opens on the sign-in screen
+        // rather than the connect screen — the state a member is in when
+        // they have already chosen where they are going.
+        let settings = settings::Settings {
+            instance_url: Some(origin),
+            ..Default::default()
+        };
+        app::run_with(settings, Some(&probe))?;
+
+        match probe.outcome() {
+            Ok(report) => {
+                println!("{report}");
+                return Ok(());
+            }
+            Err(error) => {
+                eprintln!("sign-in failed: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if let Some(index) = args.iter().position(|a| a == "--live") {
         let at = |offset: usize| args.get(index + offset).map(String::as_str).unwrap_or("");
         let (origin, user, pass) = (at(1), at(2), at(3));

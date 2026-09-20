@@ -1,0 +1,336 @@
+name: Release
+
+# Everything a release ships, which is the native client and nothing else:
+# a Windows installer, a .deb and an AppImage. Pushing a v* tag produces a
+# DRAFT release with them attached, so the notes can be reviewed before it
+# goes out. Run it manually to get the installers as workflow artifacts.
+#
+# The Tauri shell is not shipped any more and is not built here; tauri.yml
+# still checks that it compiles.
+#
+# This also runs on any change to the client, because packaging is only
+# exercised when a package is actually built, and finding out that a release
+# cannot be packaged at the moment you tag it is finding out too late. Every
+# installer it builds, it then installs, runs and uninstalls.
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      # The default branch was renamed; 'main' on its own stopped matching.
+      - 'scopeddlol/main'
+      - main
+    # Deliberately no `paths` here. A path filter applies to tag pushes too,
+    # and a tag whose commits happen not to touch desktop/ or native/ would
+    # skip this workflow and open a release with nothing attached — or no
+    # release at all. Pull requests below still get the filter, which is where
+    # the noise would otherwise be.
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+jobs:
+  native:
+    name: Native client (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: x86_64-linux
+          - os: windows-latest
+            label: x86_64-windows
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          key: release-voice
+
+      # The UI's libraries, plus ALSA and glib for libwebrtc's audio module.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libasound2-dev libglib2.0-dev xvfb xauth libgl1-mesa-dri
+
+      # libwebrtc ships a hermetic libc++ that needs clang 21 to link, and
+      # Ubuntu tops out at 18. Windows links against MSVC and needs none of it.
+      - name: Install clang 21
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSLO https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          echo "CC=/usr/bin/clang-21" >> "$GITHUB_ENV"
+          echo "CXX=/usr/bin/clang++-21" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=/usr/lib/llvm-21/lib" >> "$GITHUB_ENV"
+
+      - name: Build
+        working-directory: native
+        run: cargo build --release --locked --features voice
+
+      # A release binary that compiles and then draws nothing is the bug this
+      # client has actually had. The software renderer needs no display, so the
+      # check costs one frame.
+      - name: Check it still renders
+        shell: bash
+        working-directory: native
+        run: |
+          ./target/release/minichat-native --screenshot release-check.png 1180 820
+          size=$(stat -c%s release-check.png)
+          echo "release-check.png: $size bytes"
+          [ "$size" -gt 20000 ] || { echo "::error::the release build renders blank"; exit 1; }
+
+      - name: Check the GPU renderer
+        if: runner.os == 'Linux'
+        working-directory: native
+        run: |
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a timeout 30s \
+            ./target/release/minichat-native --screenshot-window release-gpu.png
+          [ "$(stat -c%s release-gpu.png)" -gt 20000 ]
+
+      - name: Upload release render checks
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-release-renders-${{ matrix.label }}
+          path: native/release-*.png
+          if-no-files-found: error
+          retention-days: 14
+
+      # --- packaging ----------------------------------------------------
+      #
+      # An archive is not an installer. These are: a .deb and an AppImage on
+      # Linux, an NSIS setup on Windows, each of which puts the client where
+      # the platform expects it, gives it a menu entry and takes it away
+      # again on request.
+
+      - name: Package for Linux
+        if: runner.os == 'Linux'
+        run: |
+          version=$(grep -m1 '^version = ' native/Cargo.toml | cut -d'"' -f2)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          native/packaging/linux.sh \
+            native/target/release/minichat-native "$version" dist
+
+      # Installed for real, from the package, and run from PATH: a .deb that
+      # unpacks but whose dependencies are wrong is a .deb that fails on
+      # someone else's machine instead of here.
+      - name: Install the .deb, run it, remove it
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends ./dist/minichat-native_*.deb
+          which minichat-native
+          minichat-native --screenshot /tmp/deb-render.png 1180 820
+          [ "$(stat -c%s /tmp/deb-render.png)" -gt 20000 ] \
+            || { echo "::error::the installed client renders blank"; exit 1; }
+          test -f /usr/share/applications/minichat.desktop
+          sudo apt-get install -y --no-install-recommends desktop-file-utils
+          desktop-file-validate /usr/share/applications/minichat.desktop
+          test -f /usr/share/icons/hicolor/128x128/apps/minichat.png
+          sudo apt-get remove -y minichat
+          ! command -v minichat-native
+
+      - name: Run the AppImage
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          image=$(ls dist/MiniChat-*.AppImage)
+          # No FUSE on a runner, so the runtime unpacks itself instead of
+          # mounting. What is being checked is the payload, not FUSE.
+          "$image" --appimage-extract-and-run --screenshot /tmp/appimage.png 1180 820
+          [ "$(stat -c%s /tmp/appimage.png)" -gt 20000 ] \
+            || { echo "::error::the AppImage renders blank"; exit 1; }
+
+      - name: Package for Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = [regex]::Match(
+            (Get-Content native/Cargo.toml -Raw), '(?m)^version = "(.*)"'
+          ).Groups[1].Value
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+              choco install nsis -y --no-progress | Out-Null
+          }
+          if (-not (Test-Path $makensis)) { throw "makensis is not installed" }
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $binary = (Resolve-Path native/target/release/minichat-native.exe).Path
+          $out = Join-Path (Resolve-Path dist).Path `
+            "MiniChat-$version-x86_64-setup.exe"
+          & $makensis /V2 "/DVERSION=$version" "/DBINARY=$binary" "/DOUTFILE=$out" `
+            native/packaging/windows/installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with $LASTEXITCODE" }
+          Get-Item $out | Format-List Name, Length
+
+      # Installed silently with an instance address, checked, uninstalled.
+      # The installer is the artifact now, so an installer that does not
+      # install is a release that does not ship.
+      - name: Install on Windows, check it, uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/*-setup.exe | Select-Object -First 1
+          $instance = 'https://chat.example.com'
+          $run = Start-Process -FilePath $setup.FullName `
+            -ArgumentList '/S', "/INSTANCE=$instance" -Wait -PassThru
+          Write-Host "installer exited with $($run.ExitCode)"
+
+          $exe = "$env:LOCALAPPDATA\MiniChat\minichat-native.exe"
+          $settings = "$env:APPDATA\mini\MiniChat\config\native.json"
+          for ($i = 0; $i -lt 30; $i++) {
+              if ((Test-Path $exe) -and (Test-Path $settings)) { break }
+              Start-Sleep 1
+          }
+          if (-not (Test-Path $exe)) {
+              Get-ChildItem "$env:LOCALAPPDATA\MiniChat" -ErrorAction SilentlyContinue
+              throw "the installer did not put the client at $exe"
+          }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\MiniChat.lnk")) {
+              throw "no Start Menu shortcut"
+          }
+          if (-not (Test-Path $settings)) { throw "/INSTANCE wrote nothing" }
+          $saved = (Get-Content $settings -Raw | ConvertFrom-Json).instance_url
+          if ($saved -ne $instance) { throw "settings say '$saved'" }
+          Write-Host "installed, and pointed at $saved"
+
+          # It has to draw, from where it was installed to.
+          & $exe --screenshot "$env:TEMP\installed.png" 1180 820
+          if ((Get-Item "$env:TEMP\installed.png").Length -lt 20000) {
+              throw "the installed client renders blank"
+          }
+
+          $uninstall = "$env:LOCALAPPDATA\MiniChat\uninstall.exe"
+          Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait
+          for ($i = 0; $i -lt 30 -and (Test-Path $exe); $i++) { Start-Sleep 1 }
+          if (Test-Path $exe) { throw "the client survived the uninstall" }
+          # A silent uninstall keeps the settings, so reinstalling does not
+          # cost someone their session.
+          if (-not (Test-Path $settings)) { throw "the uninstall took the settings" }
+          Write-Host "uninstalled, settings kept"
+
+      - name: What was built
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.label }}"
+            echo '```'
+            ls -lh dist | sed 's/  */ /g'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: minichat-native-${{ matrix.label }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # One release, assembled from whatever the build jobs produced. Separate so
+  # that a tag cannot open a half-empty release when one platform fails.
+  release:
+    name: Draft the release
+    runs-on: ubuntu-latest
+    needs: [native]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: minichat-native-*
+          merge-multiple: true
+
+      - name: List what is going to be attached
+        run: |
+          ls -lh dist
+          {
+            echo "### Release assets"
+            echo '```'
+            ls -1 dist
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish a draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: MiniChat ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/*-setup.exe
+          body: |
+            ## Install
+
+            ### Self-host the server
+
+            ```bash
+            curl -fLO https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/compose.yml
+            curl -fLO https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/Caddyfile
+            curl -fLO https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/livekit.yaml
+            curl -fLo .env https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/.env.example
+            # fill in .env and set MINICHAT_TAG=${{ github.ref_name }}, then:
+            docker compose up -d
+            ```
+
+            The container image for this release is published to GitHub
+            Container Registry for `linux/amd64` and `linux/arm64`:
+
+            ```
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ```
+
+            ### Desktop client
+
+            The MiniChat client, with no browser engine in it: tens of
+            megabytes resident where a WebView shell holds hundreds, and one
+            binary with no runtime to install beside it.
+
+            - **Windows** — `MiniChat-*-x86_64-setup.exe`. Installs for you
+              alone, so it needs no administrator. It is unsigned, so
+              SmartScreen warns on first run: choose **More info → Run
+              anyway**, or sign it with your own certificate.
+            - **Debian, Ubuntu** — `minichat-native_*_amd64.deb`.
+              `sudo apt install ./minichat-native_*_amd64.deb`, then find
+              MiniChat in the menu or run `minichat-native`.
+            - **Any other Linux** — `MiniChat-*-x86_64.AppImage`. Mark it
+              executable and run it; nothing to install and no root.
+
+            On first launch it asks for your instance address and remembers
+            it. To hand out a preconfigured installer, the Windows setup takes
+            the address on the command line:
+
+            ```bat
+            MiniChat-x86_64-setup.exe /S /INSTANCE=https://chat.example.com
+            ```
+
+            Voice audio works. **Camera and screen share do not yet** — use
+            the web client for those.
+
+            ### Mobile
+
+            Open your instance in a browser and add it to your Home Screen. On
+            iPhone and iPad this is required for notifications to work at all.
