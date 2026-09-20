@@ -163,7 +163,20 @@ The point of the exercise. Two things matter as much as the engine:
   held and scales them before keeping them. An instance decides what it
   serves; it must not also decide how much memory the client spends.
 
-Expect an idle client in the tens of megabytes. Note that once voice lands,
+Measured on this branch: a signed-in client, connected to an instance with
+its gateway open, sitting idle, holds **30.6 MB** resident and stays flat —
+peak equals current over a minute, no sawtooth. The release binary is 26 MB,
+of which 2.3 MB is the bundled fonts, and it has no runtime to install
+alongside it.
+
+Two caveats on that number, because it was taken in a container: it is the
+software renderer, since there is no GPU there — Skia on a real one moves
+work to the GPU rather than adding to resident memory, but it is not the same
+measurement. And it is a small instance with a handful of messages and no
+images loaded; the caps in `store.rs` and `images.rs` are what keep a busy one
+from being a different story.
+
+Note that once voice lands,
 libwebrtc comes with it and a client *in a call* will be in the hundreds
 whatever the UI toolkit — WebRTC is WebRTC. The win is concentrated in the
 idle case, which is the case being complained about.
