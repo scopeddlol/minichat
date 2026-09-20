@@ -57,6 +57,8 @@ pub struct Store {
     pub direct: HashMap<String, Vec<DirectMessage>>,
     pub selected_conversation: String,
     pub inbox_open: bool,
+    /// Calls that are ringing or connected, from the gateway.
+    pub calls: Vec<DirectCall>,
 
     pub selected_channel: String,
     pub voice_enabled: bool,
@@ -264,6 +266,32 @@ impl Store {
         if let Some(last) = self.messages_in(channel).last() {
             self.last_read.insert(channel.to_string(), last.id.clone());
         }
+    }
+
+    /// The call ringing for me that I have not answered, if any.
+    ///
+    /// Mine-as-caller is excluded: the one I placed is shown as "calling",
+    /// not as an incoming call to accept.
+    pub fn incoming_call(&self) -> Option<&DirectCall> {
+        self.calls
+            .iter()
+            .find(|c| c.status == CallStatus::Ringing && c.caller_id != self.me.member.id)
+    }
+
+    /// The call I am in or placing, if any.
+    pub fn my_call(&self) -> Option<&DirectCall> {
+        self.calls.iter().find(|c| {
+            c.status == CallStatus::Accepted
+                || (c.status == CallStatus::Ringing && c.caller_id == self.me.member.id)
+        })
+    }
+
+    /// The member on the other end of a call.
+    pub fn call_peer(&self, call: &DirectCall) -> Option<&Member> {
+        if call.caller_id != self.me.member.id {
+            return self.member(&call.caller_id);
+        }
+        self.peer(&call.conversation_id)
     }
 
     /// How I relate to another member, from my point of view.
@@ -555,6 +583,19 @@ impl Store {
                 }
 
                 self.upsert_direct(message);
+                true
+            }
+
+            "DIRECT_CALL" => {
+                let Some(call) = decode::<DirectCall>(data) else {
+                    return false;
+                };
+                // An ended call is removed rather than kept as a row saying
+                // "ended": nothing in the UI wants to know about one.
+                self.calls.retain(|c| c.id != call.id);
+                if call.is_live() {
+                    self.calls.push(call);
+                }
                 true
             }
 
@@ -1131,6 +1172,51 @@ mod tests {
             },
         );
         assert_eq!(store.direct_in("c1").len(), 1);
+    }
+
+    #[test]
+    fn a_ringing_call_is_incoming_only_when_someone_else_placed_it() {
+        let mut store = store_with_me("me");
+        let ring = |id: &str, caller: &str, status: &str| {
+            frame(
+                "DIRECT_CALL",
+                json!({
+                    "id": id,
+                    "conversation_id": "c1",
+                    "caller_id": caller,
+                    "status": status
+                }),
+            )
+        };
+
+        // Someone calling me is an incoming call to answer.
+        store.apply_event(&ring("call1", "ada", "ringing"), 0);
+        assert_eq!(store.incoming_call().map(|c| c.id.as_str()), Some("call1"));
+
+        // My own outgoing call is not something to accept.
+        store.apply_event(&ring("call1", "ada", "ended"), 0);
+        store.apply_event(&ring("call2", "me", "ringing"), 0);
+        assert!(store.incoming_call().is_none());
+        assert_eq!(store.my_call().map(|c| c.id.as_str()), Some("call2"));
+
+        // Ending it clears the row rather than keeping a dead one.
+        store.apply_event(&ring("call2", "me", "ended"), 0);
+        assert!(store.calls.is_empty());
+        assert!(store.my_call().is_none());
+    }
+
+    #[test]
+    fn an_accepted_call_is_mine_whoever_placed_it() {
+        let mut store = store_with_me("me");
+        store.apply_event(
+            &frame(
+                "DIRECT_CALL",
+                json!({"id":"c","conversation_id":"c1","caller_id":"ada","status":"accepted"}),
+            ),
+            0,
+        );
+        assert!(store.incoming_call().is_none(), "it has been answered");
+        assert!(store.my_call().is_some());
     }
 
     #[test]

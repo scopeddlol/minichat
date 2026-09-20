@@ -403,6 +403,22 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             app.set_direct_messages(app.get_messages());
             app.set_loading_direct(false);
         }
+        "ringing" => {
+            let groups = app.get_member_groups();
+            if let Some(member) = groups.row_data(0).and_then(|g| g.members.row_data(1)) {
+                app.set_call_peer(member);
+            }
+            app.set_call_phase("ringing".into());
+        }
+        "in-call" => {
+            let groups = app.get_member_groups();
+            if let Some(member) = groups.row_data(0).and_then(|g| g.members.row_data(1)) {
+                app.set_call_peer(member);
+            }
+            app.set_call_phase("connected".into());
+            app.set_call_duration("3:41".into());
+            app.set_voice_can_speak(true);
+        }
         "friends" => {
             let groups = app.get_member_groups();
             let person = |group: usize, row: usize| {

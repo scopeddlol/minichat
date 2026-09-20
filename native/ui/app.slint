@@ -11,6 +11,7 @@ import { Sidebar } from "sidebar.slint";
 import { ChatPane } from "chat.slint";
 import { MemberPanel } from "members.slint";
 import { Inbox } from "inbox.slint";
+import { CallPanel } from "call.slint";
 import { Button, ButtonKind, TextField, FieldLabel, Avatar } from "controls.slint";
 import { Icon, Icons } from "icons.slint";
 import { SettingsDialog, ProfileDialog, ConfirmDialog, Lightbox, ForwardDialog } from "modals.slint";
@@ -276,6 +277,16 @@ export component App inherits Window {
     in property <bool> voice-can-screen-share;
     in property <bool> voice-screen-sharing;
     in property <string> voice-notice;
+
+    // --- direct calls -----------------------------------------------------
+    in property <MemberRow> call-peer;
+    /// "", "ringing", "calling" or "connected".
+    in property <string> call-phase;
+    in property <string> call-duration;
+    in property <string> call-notice;
+    callback accept-call();
+    callback decline-call();
+    callback hang-up();
 
     callback toggle-mute();
     callback toggle-deafen();
@@ -688,6 +699,25 @@ export component App inherits Window {
 
         }
     }
+    }
+
+    // The call card floats over everything except a dialog, so a ringing
+    // call is visible whatever else is open.
+    if root.call-phase != "": CallPanel {
+        x: root.width - self.width - 24px;
+        y: root.height - self.height - 24px;
+        peer: root.call-peer;
+        phase: root.call-phase;
+        duration: root.call-duration;
+        muted: root.voice-muted;
+        deafened: root.voice-deafened;
+        can-speak: root.voice-can-speak;
+        notice: root.call-notice;
+        accept => { root.accept-call(); }
+        decline => { root.decline-call(); }
+        hang-up => { root.hang-up(); }
+        toggle-mute => { root.toggle-mute(); }
+        toggle-deafen => { root.toggle-deafen(); }
     }
 
     // --- overlays, above everything ------------------------------------

@@ -85,6 +85,13 @@ enum Task {
     },
     LoadConversations,
     LoadRelationships,
+    StartCall {
+        conversation: String,
+    },
+    AnswerCall {
+        call: String,
+        action: &'static str,
+    },
     Relate {
         user: String,
         action: Relate,
@@ -171,6 +178,7 @@ enum Event {
     },
     AttachFailed(String),
     Reordered,
+    CallFailed(String),
     Relationships(Vec<Relationship>),
     Conversations(Vec<Conversation>),
     ConversationOpened(Box<Conversation>),
@@ -217,6 +225,10 @@ struct AppState {
     pending_attachments: Vec<Attachment>,
     /// Why the last attachment did not upload.
     attach_notice: String,
+    /// Why the last call attempt failed.
+    call_notice: String,
+    /// When the current call was answered, for the duration readout.
+    call_started: Option<i64>,
     /// Which tab the inbox is on: 0 conversations, 1 friends.
     inbox_tab: i32,
     /// The channel the pointer went down on, which becomes the dragged one
@@ -326,6 +338,8 @@ impl AppState {
             window_focused: true,
             pending_attachments: Vec::new(),
             attach_notice: String::new(),
+            call_notice: String::new(),
+            call_started: None,
             inbox_tab: 0,
             pressed_channel: None,
             dragging: None,
@@ -846,6 +860,30 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 });
             }
 
+            Task::StartCall { conversation } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    // The gateway announces the call to both sides, so the
+                    // store learns about it by the same path either way.
+                    if let Err(error) = client.start_call(&conversation).await {
+                        let _ = events.send(Event::CallFailed(error.to_string()));
+                    }
+                });
+            }
+
+            Task::AnswerCall { call, action } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    if let Err(error) = client.call_action(&call, action).await {
+                        let _ = events.send(Event::CallFailed(error.to_string()));
+                    }
+                });
+            }
+
             Task::LoadRelationships => {
                 let (Some(client), events) = (client.clone(), events.clone()) else {
                     continue;
@@ -1135,6 +1173,37 @@ fn handle_event(
                 }
             }
 
+            // An accepted call is a voice room like any other, reached with
+            // the `direct:` conversation ID. Joined once, on the transition
+            // to accepted, rather than on every event about the call.
+            if frame.event == "DIRECT_CALL" {
+                let live = state_ref
+                    .store
+                    .my_call()
+                    .filter(|c| c.status == CallStatus::Accepted)
+                    .map(|c| c.conversation_id.clone());
+                match live {
+                    Some(conversation) if state_ref.call_started.is_none() => {
+                        state_ref.call_started = Some(now);
+                        state_ref.call_notice.clear();
+                        drop(state_ref);
+                        let _ = tasks.send(Task::JoinVoice {
+                            channel: format!("direct:{conversation}"),
+                        });
+                        return true;
+                    }
+                    None => {
+                        // The call ended, from either side.
+                        if state_ref.call_started.take().is_some() {
+                            state_ref.engine.disconnect();
+                            state_ref.voice.left();
+                        }
+                    }
+                    _ => {}
+                }
+                return changed;
+            }
+
             if frame.event == "DIRECT_MESSAGE" {
                 if let Ok(direct) = serde_json::from_value::<DirectMessage>(frame.data.clone()) {
                     let reading_it = state_ref.window_focused
@@ -1330,6 +1399,11 @@ fn handle_event(
         // The server accepted the move; the gateway's CHANNEL_UPDATEs carry
         // the new positions, so there is nothing to apply here.
         Event::Reordered => false,
+
+        Event::CallFailed(error) => {
+            state.borrow_mut().call_notice = error;
+            true
+        }
 
         Event::Relationships(list) => {
             state.borrow_mut().store.relationships = list;
@@ -1959,6 +2033,37 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
             },
         ),
     )));
+
+    // --- direct calls -------------------------------------------------------
+    //
+    // One card whether the call is ringing, being placed or connected; only
+    // the phase differs, so answering one does not move anything.
+    let call = store.incoming_call().or_else(|| store.my_call());
+    match call {
+        Some(call) => {
+            let phase = if call.status == CallStatus::Accepted {
+                "connected"
+            } else if call.caller_id == store.me.member.id {
+                "calling"
+            } else {
+                "ringing"
+            };
+            app.set_call_phase(phase.into());
+            app.set_call_peer(store.call_peer(call).map(to_member).unwrap_or_default());
+            app.set_call_duration(
+                state_ref
+                    .call_started
+                    .map(|started| crate::format::duration((now - started).max(0)))
+                    .unwrap_or_default()
+                    .into(),
+            );
+            app.set_call_notice(state_ref.call_notice.clone().into());
+        }
+        None => {
+            app.set_call_phase(SharedString::new());
+            app.set_call_duration(SharedString::new());
+        }
+    }
 
     // --- voice ------------------------------------------------------------
     let voice = &state_ref.voice;
@@ -2789,10 +2894,72 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
     });
 
     app.on_start_call({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
         move || {
-            eprintln!("minichat: direct calls need the voice feature");
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let conversation = state_ref.store.selected_conversation.clone();
+            if conversation.is_empty() || !state_ref.store.voice_enabled {
+                return;
+            }
+            state_ref.call_notice.clear();
+            drop(state_ref);
+            let _ = tasks.send(Task::StartCall { conversation });
+            refresh(&app, &state, &tasks);
         }
     });
+
+    app.on_accept_call({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let state_ref = state.borrow();
+            let Some(call) = state_ref.store.incoming_call().map(|c| c.id.clone()) else {
+                return;
+            };
+            drop(state_ref);
+            let _ = tasks.send(Task::AnswerCall {
+                call,
+                action: "accept",
+            });
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    // Declining and hanging up are the same call to the server: a call that
+    // is over is over, whoever ended it and whenever.
+    let end_call = {
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let call = state_ref
+                .store
+                .incoming_call()
+                .or_else(|| state_ref.store.my_call())
+                .map(|c| c.id.clone());
+            state_ref.engine.disconnect();
+            state_ref.voice.left();
+            state_ref.call_started = None;
+            drop(state_ref);
+
+            if let Some(call) = call {
+                let _ = tasks.send(Task::AnswerCall {
+                    call,
+                    action: "end",
+                });
+            }
+            refresh(&app, &state, &tasks);
+        }
+    };
+    app.on_decline_call(end_call.clone());
+    app.on_hang_up(end_call);
 
     // --- voice ---------------------------------------------------------------
     app.on_toggle_mute({
