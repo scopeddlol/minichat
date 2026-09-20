@@ -1,0 +1,380 @@
+// The window.
+//
+// One root component with every screen inside it, switched on `screen`. The
+// Rust side owns all state and pushes it in; nothing here fetches, stores or
+// decides — see `src/app.rs` for the wiring.
+
+import { Theme, Elevation } from "theme.slint";
+import { TitleBar } from "titlebar.slint";
+import { ConnectScreen } from "connect.slint";
+import { Sidebar } from "sidebar.slint";
+import { ChatPane } from "chat.slint";
+import { MemberPanel } from "members.slint";
+import { Button, ButtonKind, TextField, FieldLabel, Avatar } from "controls.slint";
+import { Icon, Icons } from "icons.slint";
+import {
+    MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup, ConversationRow
+} from "models.slint";
+
+export {
+    Theme, MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup,
+    ConversationRow
+}
+
+// Which screen the window is showing.
+export enum Screen { connect, signin, chat }
+
+component SignIn {
+    in property <string> instance-name;
+    in property <string> instance-initial;
+    in property <string> headline;
+    in property <string> body;
+    in property <image> instance-icon;
+    in-out property <string> username;
+    in-out property <string> password;
+    in property <string> error;
+    in property <bool> busy;
+    in property <bool> can-register;
+    callback sign-in();
+    callback register();
+    callback back();
+
+    page := Rectangle {
+        background: Theme.bg;
+
+        Rectangle {
+            width: page.width * 1.5;
+            height: self.width;
+            x: (page.width - self.width) / 2;
+            y: -self.height * 0.62;
+            border-radius: self.width / 2;
+            background: @radial-gradient(circle,
+                Theme.accent 0%,
+                Theme.accent.transparentize(0.55) 28%,
+                Theme.accent.transparentize(1.0) 62%);
+            opacity: 0.38;
+        }
+
+        card := Rectangle {
+            width: min(404px, page.width - 48px);
+            height: layout.preferred-height;
+            x: (page.width - self.width) / 2;
+            y: (page.height - self.height) / 2;
+            background: Theme.surface-1;
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            layout := VerticalLayout {
+                padding: 32px;
+
+                HorizontalLayout {
+                    alignment: start;
+                    Rectangle {
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 12px;
+                        background: Theme.accent;
+                        clip: true;
+                        if root.instance-icon.width > 0: Image {
+                            source: root.instance-icon;
+                            width: 100%; height: 100%;
+                            image-fit: cover;
+                        }
+                        if root.instance-icon.width == 0: Text {
+                            text: root.instance-initial;
+                            color: Theme.accent-ink;
+                            font-size: 20px;
+                            font-weight: 700;
+                        }
+                    }
+                }
+
+                Rectangle { height: 22px; }
+
+                Text {
+                    text: root.headline != "" ? root.headline
+                        : "Sign in to " + root.instance-name;
+                    color: Theme.text;
+                    font-size: 21px;
+                    font-weight: 650;
+                    wrap: word-wrap;
+                }
+
+                if root.body != "": Rectangle { height: 8px; }
+                if root.body != "": Text {
+                    text: root.body;
+                    color: Theme.text-muted;
+                    font-size: 13.5px;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { height: 24px; }
+
+                FieldLabel { text: "Username"; }
+                Rectangle { height: 7px; }
+                TextField {
+                    placeholder: "yourname";
+                    text <=> root.username;
+                    enabled: !root.busy;
+                }
+
+                Rectangle { height: 14px; }
+
+                FieldLabel { text: "Password"; }
+                Rectangle { height: 7px; }
+                TextField {
+                    placeholder: "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+                    text <=> root.password;
+                    password: true;
+                    enabled: !root.busy;
+                    error: root.error;
+                    accepted => { root.sign-in(); }
+                }
+
+                Rectangle { height: 20px; }
+
+                Button {
+                    label: root.busy ? "Signing in\u{2026}" : "Sign in";
+                    kind: ButtonKind.primary;
+                    wide: true;
+                    busy: root.busy;
+                    enabled: root.username != "" && root.password != "" && !root.busy;
+                    clicked => { root.sign-in(); }
+                }
+
+                if root.can-register: Rectangle { height: 10px; }
+                if root.can-register: Button {
+                    label: "Create an account";
+                    kind: ButtonKind.ghost;
+                    wide: true;
+                    enabled: !root.busy;
+                    clicked => { root.register(); }
+                }
+
+                Rectangle { height: 16px; }
+
+                Button {
+                    label: "Use a different instance";
+                    kind: ButtonKind.ghost;
+                    wide: true;
+                    enabled: !root.busy;
+                    clicked => { root.back(); }
+                }
+            }
+        }
+    }
+}
+
+export component App inherits Window {
+    title: "MiniChat";
+    background: Theme.bg;
+    default-font-family: Theme.font-sans;
+    default-font-size: 14px;
+    preferred-width: 1180px;
+    preferred-height: 820px;
+    min-width: 420px;
+    min-height: 520px;
+    no-frame: true;
+
+    in property <Screen> screen: Screen.connect;
+    in property <bool> maximised: false;
+
+    // --- connect ---------------------------------------------------------
+    in-out property <string> address;
+    in property <string> connect-error;
+    in property <bool> connecting;
+    in property <string> last-instance;
+    callback connect(string);
+
+    // --- sign in ---------------------------------------------------------
+    in-out property <string> username;
+    in-out property <string> password;
+    in property <string> auth-error;
+    in property <bool> authenticating;
+    in property <bool> can-register;
+    in property <string> login-headline;
+    in property <string> login-body;
+    callback sign-in();
+    callback register();
+    callback forget-instance();
+
+    // --- instance --------------------------------------------------------
+    in property <string> instance-name: "MiniChat";
+    in property <string> instance-tagline;
+    in property <string> instance-initial: "M";
+    in property <image> instance-icon;
+
+    // --- chat ------------------------------------------------------------
+    in property <[CategoryRow]> categories;
+    in property <[ChannelRow]> loose-channels;
+    in property <string> selected-channel;
+    in property <string> channel-name;
+    in property <string> channel-topic;
+    in property <string> channel-kind: "text";
+    in property <bool> channel-private;
+    in property <[MessageRow]> messages;
+    in property <bool> loading-messages;
+    in property <[MemberGroup]> member-groups;
+    in property <int> member-count;
+    in property <bool> members-open: true;
+    in property <bool> can-send: true;
+    in property <string> compose-notice;
+    in property <string> replying-to;
+    in property <string> typing-line;
+    in-out property <string> draft;
+    in property <int> direct-unread;
+    in property <bool> inbox-open;
+    in property <string> connection: "ready";
+
+    // --- me --------------------------------------------------------------
+    in property <string> my-name;
+    in property <string> my-status;
+    in property <image> my-avatar;
+    in property <color> my-avatar-fallback;
+    in property <string> my-initials;
+    in property <string> my-presence: "online";
+    in property <bool> can-admin;
+    in property <bool> can-invite;
+
+    callback select-channel(string);
+    callback toggle-category(string);
+    callback open-inbox();
+    callback open-settings();
+    callback open-admin();
+    callback open-invites();
+    callback open-profile();
+    callback channel-menu(string);
+    callback send(string);
+    callback cancel-reply();
+    callback attach();
+    callback emoji();
+    callback typing();
+    callback toggle-members();
+    callback open-search();
+    callback open-pins();
+    callback react(string, string);
+    callback reply-to(string);
+    callback edit-message(string);
+    callback delete-message(string);
+    callback pin-message(string);
+    callback open-author(string);
+    callback run-activated(string, int);
+    callback open-attachment(string);
+    callback body-width-changed(length);
+    callback open-member(string);
+    callback member-menu(string);
+
+    callback minimise();
+    callback toggle-maximise();
+    callback quit();
+
+    VerticalLayout {
+        TitleBar {
+            title: root.screen == Screen.chat && root.channel-name != ""
+                ? root.instance-name + "  \u{2014}  #" + root.channel-name
+                : root.instance-name;
+            maximised: root.maximised;
+            minimise => { root.minimise(); }
+            toggle-maximise => { root.toggle-maximise(); }
+            close => { root.quit(); }
+        }
+
+        if root.screen == Screen.connect: ConnectScreen {
+            address <=> root.address;
+            error: root.connect-error;
+            busy: root.connecting;
+            last-instance: root.last-instance;
+            connect(value) => { root.connect(value); }
+        }
+
+        if root.screen == Screen.signin: SignIn {
+            instance-name: root.instance-name;
+            instance-initial: root.instance-initial;
+            instance-icon: root.instance-icon;
+            headline: root.login-headline;
+            body: root.login-body;
+            username <=> root.username;
+            password <=> root.password;
+            error: root.auth-error;
+            busy: root.authenticating;
+            can-register: root.can-register;
+            sign-in => { root.sign-in(); }
+            register => { root.register(); }
+            back => { root.forget-instance(); }
+        }
+
+        if root.screen == Screen.chat: HorizontalLayout {
+            spacing: 0px;
+
+            Sidebar {
+                instance-name: root.instance-name;
+                instance-initial: root.instance-initial;
+                instance-tagline: root.instance-tagline;
+                instance-icon: root.instance-icon;
+                categories: root.categories;
+                loose-channels: root.loose-channels;
+                selected-channel: root.selected-channel;
+                inbox-open: root.inbox-open;
+                direct-unread: root.direct-unread;
+                can-invite: root.can-invite;
+                can-admin: root.can-admin;
+                my-name: root.my-name;
+                my-status: root.my-status;
+                my-avatar: root.my-avatar;
+                my-avatar-fallback: root.my-avatar-fallback;
+                my-initials: root.my-initials;
+                my-presence: root.my-presence;
+                connection: root.connection;
+                select-channel(id) => { root.select-channel(id); }
+                toggle-category(id) => { root.toggle-category(id); }
+                open-inbox => { root.open-inbox(); }
+                open-settings => { root.open-settings(); }
+                open-admin => { root.open-admin(); }
+                open-invites => { root.open-invites(); }
+                open-profile => { root.open-profile(); }
+                channel-menu(id) => { root.channel-menu(id); }
+            }
+
+            ChatPane {
+                horizontal-stretch: 1;
+                channel-name: root.channel-name;
+                channel-topic: root.channel-topic;
+                channel-kind: root.channel-kind;
+                channel-private: root.channel-private;
+                messages: root.messages;
+                loading: root.loading-messages;
+                members-open: root.members-open;
+                can-send: root.can-send;
+                compose-notice: root.compose-notice;
+                replying-to: root.replying-to;
+                typing-line: root.typing-line;
+                draft <=> root.draft;
+                send(text) => { root.send(text); }
+                cancel-reply => { root.cancel-reply(); }
+                attach => { root.attach(); }
+                emoji => { root.emoji(); }
+                typing => { root.typing(); }
+                toggle-members => { root.toggle-members(); }
+                open-search => { root.open-search(); }
+                open-pins => { root.open-pins(); }
+                react(id, emoji) => { root.react(id, emoji); }
+                reply-to(id) => { root.reply-to(id); }
+                edit-message(id) => { root.edit-message(id); }
+                delete-message(id) => { root.delete-message(id); }
+                pin-message(id) => { root.pin-message(id); }
+                open-author(id) => { root.open-author(id); }
+                run-activated(target, kind) => { root.run-activated(target, kind); }
+                open-attachment(id) => { root.open-attachment(id); }
+                body-width-changed(w) => { root.body-width-changed(w); }
+            }
+
+            if root.members-open: MemberPanel {
+                groups: root.member-groups;
+                total: root.member-count;
+                open-member(id) => { root.open-member(id); }
+                member-menu(id) => { root.member-menu(id); }
+            }
+        }
+    }
+}

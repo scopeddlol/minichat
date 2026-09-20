@@ -1,0 +1,100 @@
+// The caption bar.
+//
+// The window is frameless — the app draws its own chrome so it looks like
+// MiniChat rather than like a browser in a box. Kept in step with the web
+// client's <TitleBar /> and with the Tauri connect screen's, so moving
+// between them never visibly changes the chrome.
+
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+
+component WindowButton {
+    in property <string> icon;
+    in property <bool> danger: false;
+    callback clicked();
+
+    width: 46px;
+
+    Rectangle {
+        background: touch.has-hover
+            ? (root.danger ? #e81123 : (Theme.light ? #00000014 : #ffffff14))
+            : transparent;
+        animate background { duration: Theme.fast; }
+
+        Icon {
+            data: root.icon;
+            size: 15px;
+            colour: touch.has-hover
+                ? (root.danger ? white : Theme.text)
+                : Theme.text-muted;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component TitleBar {
+    in property <string> title: "MiniChat";
+    in property <bool> maximised: false;
+    /// The dragged region reports back so the window can be moved; the shell
+    /// owns the actual move because only it has the window handle.
+    callback drag-started();
+    callback minimise();
+    callback toggle-maximise();
+    callback close();
+
+    height: Theme.titlebar-h;
+
+    Rectangle {
+        background: Theme.surface-0;
+
+        HorizontalLayout {
+            padding-left: 12px;
+            alignment: stretch;
+
+            Text {
+                text: root.title;
+                color: Theme.text-muted;
+                font-size: 12px;
+                font-weight: 600;
+                letter-spacing: 0.24px;
+                vertical-alignment: center;
+            }
+
+            // The draggable region: everything between the name and the
+            // window controls, double-clickable to maximise like a real one.
+            Rectangle {
+                horizontal-stretch: 1;
+                drag := TouchArea {
+                    mouse-cursor: MouseCursor.default;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) { root.drag-started(); }
+                    }
+                    double-clicked => { root.toggle-maximise(); }
+                }
+            }
+
+            WindowButton {
+                icon: Icons.minimise;
+                clicked => { root.minimise(); }
+            }
+            WindowButton {
+                icon: root.maximised ? Icons.restore : Icons.maximise;
+                clicked => { root.toggle-maximise(); }
+            }
+            WindowButton {
+                icon: Icons.close;
+                danger: true;
+                clicked => { root.close(); }
+            }
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border-soft;
+    }
+}

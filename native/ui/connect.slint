@@ -1,0 +1,124 @@
+// The connect screen: which instance to open.
+//
+// MiniChat is self-hosted, so there is no URL to bake in at build time. This
+// is what the app shows on first launch, and again whenever the member asks
+// to switch instances.
+
+import { Theme, Elevation } from "theme.slint";
+import { Button, ButtonKind, TextField, FieldLabel } from "controls.slint";
+import { Icon, Icons } from "icons.slint";
+
+export component ConnectScreen {
+    in-out property <string> address;
+    in property <string> error;
+    in property <bool> busy: false;
+    in property <string> last-instance;
+    callback connect(string);
+    callback forget();
+
+    page := Rectangle {
+        background: Theme.bg;
+
+        // The wash behind the card: the stylesheet's
+        // `radial-gradient(circle at 50% -10%, accent 22%, transparent 62%)`,
+        // anchored above the top edge so only its lower half is seen.
+        Rectangle {
+            width: parent.width * 1.5;
+            height: self.width;
+            x: (parent.width - self.width) / 2;
+            y: -self.height * 0.62;
+            border-radius: self.width / 2;
+            background: @radial-gradient(circle,
+                Theme.accent 0%,
+                Theme.accent.transparentize(0.55) 28%,
+                Theme.accent.transparentize(1.0) 62%);
+            opacity: 0.38;
+        }
+
+        // Positioned rather than centred by a layout: a centring layout's
+        // own width would depend on the card's, which depends on the page's,
+        // which is the layout's — a cycle Slint warns about and may panic on.
+        card := Rectangle {
+            width: min(400px, page.width - 48px);
+            height: layout.preferred-height;
+            x: (page.width - self.width) / 2;
+            y: (page.height - self.height) / 2;
+            background: Theme.surface-1;
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            layout := VerticalLayout {
+                padding: 32px;
+                spacing: 0px;
+
+                // Mark
+                HorizontalLayout {
+                    alignment: start;
+                    Rectangle {
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 12px;
+                        background: Theme.accent;
+                        Icon {
+                            data: Icons.message-square;
+                            colour: Theme.accent-ink;
+                            size: 22px;
+                        }
+                    }
+                }
+
+                Rectangle { height: 22px; }
+
+                Text {
+                    text: "Connect to MiniChat";
+                    color: Theme.text;
+                    font-size: 21px;
+                    font-weight: 650;
+                }
+
+                Rectangle { height: 8px; }
+
+                Text {
+                    text: "Enter the address of your community's instance.";
+                    color: Theme.text-muted;
+                    font-size: 13.5px;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { height: 26px; }
+
+                FieldLabel { text: "Instance address"; }
+                Rectangle { height: 7px; }
+
+                TextField {
+                    placeholder: "chat.example.com";
+                    text <=> root.address;
+                    error: root.error;
+                    enabled: !root.busy;
+                    accepted(value) => { root.connect(value); }
+                }
+
+                Rectangle { height: 20px; }
+
+                Button {
+                    label: root.busy ? "Connecting\u{2026}" : "Connect";
+                    kind: ButtonKind.primary;
+                    wide: true;
+                    busy: root.busy;
+                    enabled: root.address != "" && !root.busy;
+                    clicked => { root.connect(root.address); }
+                }
+
+                if root.last-instance != "": Rectangle { height: 14px; }
+                if root.last-instance != "": Text {
+                    text: "Last used " + root.last-instance;
+                    color: Theme.text-faint;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+}

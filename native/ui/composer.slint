@@ -1,0 +1,156 @@
+// The message composer.
+//
+// `.channel-composer { padding: 16px clamp(16px,3vw,32px) }` in the web
+// client; the box itself grows with the draft up to a cap, then scrolls.
+
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+import { IconButton } from "controls.slint";
+
+export component Composer {
+    in property <string> placeholder: "Message";
+    in-out property <string> draft;
+    in property <bool> enabled: true;
+    /// Non-empty while a slow mode is in force.
+    in property <string> notice;
+    in property <string> replying-to;
+    in property <bool> can-attach: true;
+
+    callback send(string);
+    callback cancel-reply();
+    callback attach();
+    callback emoji();
+    callback typing();
+
+    height: 16px + (root.replying-to != "" ? 34px : 0px)
+        + max(46px, min(180px, input.preferred-height + 26px))
+        + (root.notice != "" ? 20px : 0px) + 20px;
+
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: 16px;
+        padding-bottom: 20px;
+        spacing: 0px;
+
+        // The "replying to" strip sits on top of the box and shares its
+        // rounding, so the two read as one control.
+        if root.replying-to != "": Rectangle {
+            height: 34px;
+            background: Theme.surface-2;
+            border-top-left-radius: Theme.radius-control;
+            border-top-right-radius: Theme.radius-control;
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 6px;
+                spacing: 8px;
+                Icon {
+                    data: Icons.reply;
+                    size: 14px;
+                    colour: Theme.text-faint;
+                    y: (parent.height - self.height) / 2;
+                }
+                Text {
+                    text: "Replying to " + root.replying-to;
+                    color: Theme.text-muted;
+                    font-size: 12.5px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                IconButton {
+                    icon: Icons.close;
+                    size: 24px;
+                    glyph: 14px;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.cancel-reply(); }
+                }
+            }
+        }
+
+        Rectangle {
+            height: max(46px, min(180px, input.preferred-height + 26px));
+            background: Theme.surface-1;
+            border-radius: Theme.radius-control;
+            border-top-left-radius: root.replying-to != "" ? 0 : Theme.radius-control;
+            border-top-right-radius: root.replying-to != "" ? 0 : Theme.radius-control;
+            border-width: 1px;
+            border-color: input.has-focus ? Theme.accent : Theme.border;
+            animate border-color { duration: Theme.normal; }
+
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 2px;
+
+                if root.can-attach: IconButton {
+                    icon: Icons.paperclip;
+                    tooltip: "Attach a file";
+                    enabled: root.enabled;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.attach(); }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    clip: true;
+
+                    Flickable {
+                        content-height: input.preferred-height;
+                        input := TextInput {
+                            width: parent.width - 8px;
+                            x: 4px;
+                            text <=> root.draft;
+                            color: Theme.text;
+                            font-size: 14.4px;
+                            font-family: Theme.font-sans;
+                            wrap: word-wrap;
+                            single-line: false;
+                            enabled: root.enabled;
+                            edited => { root.typing(); }
+                            // Enter sends; Shift+Enter is handled by the key
+                            // handler below, which inserts a newline instead.
+                            accepted => { root.send(self.text); }
+                        }
+                    }
+
+                    if root.draft == "" && !input.has-focus: Text {
+                        x: 4px;
+                        y: 13px;
+                        text: root.placeholder;
+                        color: Theme.text-faint;
+                        font-size: 14.4px;
+                    }
+                }
+
+                IconButton {
+                    icon: Icons.smile;
+                    tooltip: "Emoji";
+                    enabled: root.enabled;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.emoji(); }
+                }
+
+                // The send button lights up only when there is something to
+                // send, which is the whole affordance.
+                IconButton {
+                    icon: Icons.send;
+                    tooltip: "Send";
+                    enabled: root.enabled && root.draft != "";
+                    colour: root.draft != "" ? Theme.accent : Theme.text-faint;
+                    active-colour: Theme.accent;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.send(root.draft); }
+                }
+            }
+        }
+
+        if root.notice != "": Text {
+            text: root.notice;
+            color: Theme.text-faint;
+            font-size: 11.5px;
+            height: 20px;
+            vertical-alignment: center;
+        }
+    }
+}

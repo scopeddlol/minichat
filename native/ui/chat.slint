@@ -1,0 +1,254 @@
+// The chat pane: channel header, message list, composer.
+
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+import { IconButton, Divider, Avatar } from "controls.slint";
+import { MessageItem, Metrics } from "messages.slint";
+import { Composer } from "composer.slint";
+import { MessageRow } from "models.slint";
+
+export component ChatPane {
+    in property <string> channel-name;
+    in property <string> channel-topic;
+    in property <string> channel-kind: "text";
+    in property <bool> channel-private;
+    in property <[MessageRow]> messages;
+    in property <bool> loading;
+    in property <bool> members-open: true;
+    in property <bool> can-send: true;
+    in property <string> compose-notice;
+    in property <string> replying-to;
+    in property <string> typing-line;
+    in-out property <string> draft;
+
+    callback send(string);
+    callback cancel-reply();
+    callback attach();
+    callback emoji();
+    callback typing();
+    callback toggle-members();
+    callback open-search();
+    callback open-pins();
+    callback react(string, string);
+    callback reply-to(string);
+    callback edit-message(string);
+    callback delete-message(string);
+    callback pin-message(string);
+    callback open-author(string);
+    callback run-activated(string, int);
+    callback open-attachment(string);
+    callback scrolled(length);
+    callback body-width-changed(length);
+
+    VerticalLayout {
+        // --- header ------------------------------------------------------
+        Rectangle {
+            height: 56px;
+            background: Theme.surface-1;
+
+            HorizontalLayout {
+                padding-left: 22px;
+                padding-right: 12px;
+                spacing: 10px;
+
+                Icon {
+                    data: root.channel-kind == "voice" ? Icons.volume
+                        : root.channel-kind == "announcement" ? Icons.megaphone
+                        : root.channel-private ? Icons.shield
+                        : Icons.hash;
+                    size: 19px;
+                    colour: Theme.text-faint;
+                    y: (parent.height - self.height) / 2;
+                }
+
+                Text {
+                    text: root.channel-name;
+                    color: Theme.text;
+                    font-size: 15.5px;
+                    font-weight: 650;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if root.channel-topic != "": Rectangle {
+                    width: 1px;
+                    height: 22px;
+                    y: (parent.height - self.height) / 2;
+                    background: Theme.border;
+                }
+                if root.channel-topic != "": Text {
+                    text: root.channel-topic;
+                    color: Theme.text-faint;
+                    font-size: 12.8px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                if root.channel-topic == "": Rectangle { horizontal-stretch: 1; }
+
+                IconButton {
+                    icon: Icons.pin;
+                    tooltip: "Pinned messages";
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.open-pins(); }
+                }
+                IconButton {
+                    icon: Icons.search;
+                    tooltip: "Search";
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.open-search(); }
+                }
+                IconButton {
+                    icon: Icons.users;
+                    tooltip: root.members-open ? "Hide members" : "Show members";
+                    active: root.members-open;
+                    y: (parent.height - self.height) / 2;
+                    clicked => { root.toggle-members(); }
+                }
+            }
+        }
+        Divider {}
+
+        // --- messages ----------------------------------------------------
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.bg;
+            clip: true;
+
+            // The column a message body wraps into: the pane, less the side
+            // padding and the avatar gutter. Reported to Rust because the
+            // flow layout runs there, and it has to be redone on a resize.
+            changed width => {
+                root.body-width-changed(self.width - Metrics.side-padding * 2 - Metrics.body-x);
+            }
+
+            if root.loading && root.messages.length == 0: VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "Loading messages\u{2026}";
+                    color: Theme.text-faint;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                }
+            }
+
+            // The empty state doubles as the channel's introduction, the way
+            // the web client opens a channel you have never posted in.
+            if !root.loading && root.messages.length == 0: VerticalLayout {
+                alignment: center;
+                spacing: 10px;
+                padding-left: 40px;
+                padding-right: 40px;
+
+                Rectangle {
+                    height: 56px;
+                    width: 56px;
+                    x: (parent.width - self.width) / 2;
+                    border-radius: 28px;
+                    background: Theme.surface-2;
+                    Icon {
+                        data: root.channel-kind == "voice" ? Icons.volume : Icons.hash;
+                        size: 26px;
+                        colour: Theme.text-faint;
+                    }
+                }
+                Text {
+                    text: "Welcome to #" + root.channel-name;
+                    color: Theme.text;
+                    font-size: 19px;
+                    font-weight: 650;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: root.channel-topic != "" ? root.channel-topic
+                        : "This is the beginning of the channel.";
+                    color: Theme.text-faint;
+                    font-size: 13.5px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+
+            scroll := Flickable {
+                content-height: stack.preferred-height;
+                content-y <=> root.viewport-y;
+
+                stack := VerticalLayout {
+                    padding-top: 20px;
+                    padding-bottom: 12px;
+                    spacing: 0px;
+
+                    for message in root.messages: MessageItem {
+                        message: message;
+                        react(id, emoji) => { root.react(id, emoji); }
+                        reply => { root.reply-to(message.id); }
+                        edit => { root.edit-message(message.id); }
+                        remove => { root.delete-message(message.id); }
+                        pin => { root.pin-message(message.id); }
+                        open-author(id) => { root.open-author(id); }
+                        run-activated(target, kind) => { root.run-activated(target, kind); }
+                        open-attachment(id) => { root.open-attachment(id); }
+                    }
+                }
+            }
+        }
+
+        // --- who is typing -------------------------------------------------
+        if root.typing-line != "": Rectangle {
+            height: 20px;
+            background: Theme.bg;
+            Text {
+                x: Metrics.side-padding;
+                text: root.typing-line;
+                color: Theme.text-faint;
+                font-size: 11.5px;
+                vertical-alignment: center;
+            }
+        }
+
+        // --- composer ------------------------------------------------------
+        if root.can-send: composer := Composer {
+                placeholder: "Message #" + root.channel-name;
+                draft <=> root.draft;
+                enabled: root.can-send;
+                notice: root.compose-notice;
+                replying-to: root.replying-to;
+                send(text) => { root.send(text); }
+                cancel-reply => { root.cancel-reply(); }
+                attach => { root.attach(); }
+                emoji => { root.emoji(); }
+                typing => { root.typing(); }
+        }
+
+        // The read-only notice an announcement channel shows in place of the
+        // composer when the member may not post.
+        if !root.can-send: Rectangle {
+            height: 56px;
+            background: Theme.bg;
+            HorizontalLayout {
+                padding-left: Metrics.side-padding;
+                padding-right: Metrics.side-padding;
+                spacing: 9px;
+                alignment: start;
+                Icon {
+                    data: Icons.lock;
+                    size: 15px;
+                    colour: Theme.text-faint;
+                    y: (parent.height - self.height) / 2;
+                }
+                Text {
+                    text: "You do not have permission to post in this channel.";
+                    color: Theme.text-faint;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    in-out property <length> viewport-y;
+
+    public function scroll-to-bottom() {
+        self.viewport-y = min(0px, scroll.height - scroll.content-height);
+    }
+}

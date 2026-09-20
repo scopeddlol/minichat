@@ -1,0 +1,376 @@
+// Control primitives, matching the `@utility` blocks in `web/src/index.css`.
+//
+// The measurements are the stylesheet's, converted from rem at the 16px root
+// the web client uses: 0.875rem is 14px, 0.65rem 10.4px, and so on. They are
+// written out rather than rounded, because the difference between 10px and
+// 10.4px of button padding is the difference between this looking like the
+// web client and looking like an imitation of it.
+
+import { Theme, Elevation } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+
+export enum ButtonKind { primary, ghost, subtle, danger }
+
+export component Button {
+    in property <string> label;
+    in property <ButtonKind> kind: ButtonKind.subtle;
+    in property <string> icon;
+    in property <bool> enabled: true;
+    in property <bool> busy: false;
+    /// Stretches to the width offered, for a dialog's primary action.
+    in property <bool> wide: false;
+    callback clicked();
+
+    property <bool> live: root.enabled && !root.busy;
+    property <bool> hovering: touch.has-hover && root.live;
+    property <bool> pressing: touch.pressed && root.live;
+
+    property <brush> background:
+        root.kind == ButtonKind.primary ? (root.hovering ? Theme.accent-hover : Theme.accent)
+        : root.kind == ButtonKind.subtle ? (root.hovering ? Theme.surface-3 : Theme.surface-2)
+        : root.kind == ButtonKind.danger ? (root.hovering ? Theme.danger-hover : Theme.danger-bg)
+        : (root.hovering ? Theme.surface-2 : transparent);
+
+    property <brush> foreground:
+        root.kind == ButtonKind.primary ? Theme.accent-ink
+        : root.kind == ButtonKind.danger ? Theme.danger
+        : root.kind == ButtonKind.ghost ? (root.hovering ? Theme.text : Theme.text-muted)
+        : Theme.text;
+
+    property <brush> outline:
+        root.kind == ButtonKind.subtle ? Theme.border
+        : root.kind == ButtonKind.danger ? Theme.danger-border
+        : transparent;
+
+    min-width: root.wide ? 0 : body.min-width + 32px;
+    horizontal-stretch: root.wide ? 1 : 0;
+    min-height: 38px;
+    // `.btn:disabled { opacity: .5 }`.
+    opacity: root.live ? 1.0 : 0.5;
+
+    surface := Rectangle {
+        background: root.background;
+        border-radius: Theme.radius-control;
+        border-width: 1px;
+        border-color: root.outline;
+        // `.btn:active { transform: translateY(1px) }`.
+        y: root.pressing ? 1px : 0;
+
+        animate background { duration: Theme.normal; easing: ease-out; }
+        animate y { duration: Theme.fast; easing: ease-out; }
+
+        body := HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 8px;
+            alignment: center;
+
+            if root.icon != "" && !root.busy: Icon {
+                data: root.icon;
+                colour: root.foreground;
+                size: 16px;
+                y: (parent.height - self.height) / 2;
+            }
+
+            if root.busy: Rectangle {
+                width: 14px;
+                height: 14px;
+                y: (parent.height - self.height) / 2;
+                Rectangle {
+                    width: 100%; height: 100%;
+                    border-radius: self.width / 2;
+                    border-width: 2px;
+                    border-color: root.foreground;
+                    opacity: 0.35;
+                }
+                // A quarter-arc sweeping round, which reads as a spinner
+                // without needing a rotation transform on a Path.
+                Rectangle {
+                    width: 5px; height: 5px;
+                    border-radius: 2.5px;
+                    background: root.foreground;
+                    x: 4.5px + 6px * cos(spin.progress * 360deg);
+                    y: 4.5px + 6px * sin(spin.progress * 360deg);
+                }
+            }
+
+            if root.label != "": Text {
+                text: root.label;
+                color: root.foreground;
+                font-size: 14px;
+                // `.btn { font-weight: 560 }` — between medium and semibold.
+                font-weight: 560;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    // Focus ring: `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }`.
+    if focus.has-focus: Rectangle {
+        x: -3px; y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: Theme.radius-control + 3px;
+        border-width: 2px;
+        border-color: Theme.accent;
+    }
+
+    spin := Timer {
+        interval: 40ms;
+        running: root.busy && !Theme.reduced-motion;
+        property <float> progress: 0;
+        triggered => { self.progress = Math.mod(self.progress + 0.04, 1.0); }
+    }
+
+    focus := FocusScope {
+        enabled: root.live;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") { root.clicked(); return accept; }
+            return reject;
+        }
+        touch := TouchArea {
+            enabled: root.live;
+            mouse-cursor: root.live ? MouseCursor.pointer : MouseCursor.not-allowed;
+            clicked => { focus.focus(); root.clicked(); }
+        }
+    }
+}
+
+// A square, icon-only button. `.btn.btn-ghost.!p-1.5` in the web client.
+export component IconButton {
+    in property <string> icon;
+    in property <string> tooltip;
+    in property <bool> enabled: true;
+    in property <bool> active: false;
+    in property <length> size: 32px;
+    in property <length> glyph: 18px;
+    in property <brush> colour: Theme.text-muted;
+    in property <brush> active-colour: Theme.text;
+    callback clicked();
+
+    width: root.size;
+    height: root.size;
+    opacity: root.enabled ? 1.0 : 0.4;
+
+    Rectangle {
+        background: touch.has-hover && root.enabled ? Theme.surface-2
+            : root.active ? Theme.surface-2 : transparent;
+        border-radius: Theme.radius-control;
+        animate background { duration: Theme.normal; easing: ease-out; }
+
+        Icon {
+            data: root.icon;
+            size: root.glyph;
+            colour: (touch.has-hover && root.enabled) || root.active
+                ? root.active-colour : root.colour;
+            animate colour { duration: Theme.normal; }
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+
+    if root.tooltip != "" && touch.has-hover: Rectangle {
+        // Sits above the button, centred, out of the layout's way.
+        y: -self.height - 6px;
+        width: hint.width + 16px;
+        height: hint.height + 10px;
+        background: Theme.surface-3;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Theme.border;
+        hint := Text {
+            text: root.tooltip;
+            color: Theme.text;
+            font-size: 12px;
+            font-weight: 500;
+        }
+    }
+}
+
+export component TextField {
+    in property <string> placeholder;
+    in-out property <string> text;
+    in property <bool> password: false;
+    in property <bool> enabled: true;
+    /// Shown under the field in the danger colour, as a form error.
+    in property <string> error;
+    callback accepted(string);
+    callback edited(string);
+
+    min-height: root.error == "" ? 38px : 58px;
+    horizontal-stretch: 1;
+
+    VerticalLayout {
+        spacing: 5px;
+
+        Rectangle {
+            height: 38px;
+            // `.input { background: var(--surface-0) }`.
+            background: Theme.surface-0;
+            border-radius: Theme.radius-control;
+            border-width: 1px;
+            border-color: root.error != "" ? Theme.danger
+                : input.has-focus ? Theme.accent : Theme.border;
+            animate border-color { duration: Theme.normal; }
+
+            // `.input:focus { box-shadow: 0 0 0 3px var(--accent-soft) }`.
+            if input.has-focus && root.error == "": Rectangle {
+                x: -3px; y: -3px;
+                width: parent.width + 6px;
+                height: parent.height + 6px;
+                border-radius: Theme.radius-control + 3px;
+                border-width: 3px;
+                border-color: Theme.accent-soft;
+            }
+
+            HorizontalLayout {
+                padding-left: 12.8px;
+                padding-right: 12.8px;
+
+                input := TextInput {
+                    text <=> root.text;
+                    color: Theme.text;
+                    font-size: 14.4px;
+                    font-family: Theme.font-sans;
+                    vertical-alignment: center;
+                    single-line: true;
+                    enabled: root.enabled;
+                    input-type: root.password ? InputType.password : InputType.text;
+                    accepted => { root.accepted(self.text); }
+                    edited => { root.edited(self.text); }
+                }
+            }
+
+            if root.text == "" && !input.has-focus: Text {
+                x: 12.8px;
+                text: root.placeholder;
+                color: Theme.text-faint;
+                font-size: 14.4px;
+                vertical-alignment: center;
+            }
+        }
+
+        if root.error != "": Text {
+            text: root.error;
+            color: Theme.danger;
+            font-size: 12.5px;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// `.label` — the caption above a field.
+export component FieldLabel inherits Text {
+    color: Theme.text-muted;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.25px;
+}
+
+export component Avatar {
+    in property <string> name;
+    in property <string> id;
+    in property <image> picture;
+    in property <length> size: 36px;
+    /// Empty means no dot is drawn — a message author, rather than a member row.
+    in property <string> presence;
+    in property <bool> speaking: false;
+    /// The deterministic fallback colour, computed in Rust from the ID.
+    in property <color> fallback: Theme.surface-3;
+    in property <string> initials;
+
+    width: root.size;
+    height: root.size;
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: root.size / 2;
+        background: root.fallback;
+        clip: true;
+
+        if root.picture.width > 0: Image {
+            source: root.picture;
+            width: 100%;
+            height: 100%;
+            image-fit: cover;
+        }
+
+        if root.picture.width == 0: Text {
+            text: root.initials;
+            color: white;
+            font-size: root.size * 0.38;
+            font-weight: 600;
+        }
+    }
+
+    // `ring` in the web client's <Avatar />: a 2px accent ring while speaking.
+    if root.speaking: Rectangle {
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        x: -2px; y: -2px;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: Theme.accent;
+    }
+
+    if root.presence != "": Rectangle {
+        // 28% of the avatar, bottom-right, with a 2.5px cut-out so it reads
+        // against the row behind it.
+        width: max(8px, root.size * 0.28);
+        height: self.width;
+        x: parent.width - self.width + 1px;
+        y: parent.height - self.height + 1px;
+        border-radius: self.width / 2;
+        border-width: 2.5px;
+        border-color: Theme.surface-1;
+        background: root.presence == "online" ? Theme.success
+            : root.presence == "idle" ? Theme.warning
+            : root.presence == "dnd" ? Theme.danger
+            : Theme.text-faint;
+    }
+}
+
+// `.unread-dot` — the pill carrying an unread or mention count.
+export component CountPill inherits Rectangle {
+    in property <int> count;
+    in property <bool> mention: false;
+
+    width: label.width + 12px;
+    height: 18px;
+    border-radius: 6px;
+    background: root.mention ? Theme.danger : Theme.accent-soft;
+
+    label := Text {
+        text: root.count > 99 ? "99+" : root.count;
+        color: root.mention ? white : Theme.text;
+        font-size: 11px;
+        font-weight: 700;
+    }
+}
+
+// `@utility card`.
+export component Card inherits Rectangle {
+    background: Theme.surface-1;
+    border-radius: Theme.radius-card;
+    border-width: 1px;
+    border-color: Theme.border;
+}
+
+export component Divider inherits Rectangle {
+    height: 1px;
+    background: Theme.border-soft;
+}
+
+// A section caption in the sidebar: `.navigation-label`.
+export component NavLabel inherits Text {
+    color: Theme.text-faint;
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 1.2px;
+}
