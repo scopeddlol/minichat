@@ -146,6 +146,7 @@ pub fn populate(app: &ui::App, palette: &Palette) {
         unread,
         mentions,
         voice_count: 0,
+        voice_members: ModelRc::new(VecModel::from(Vec::<ui::VoiceMember>::new())),
     };
 
     let general = ui::CategoryRow {
@@ -163,6 +164,26 @@ pub fn populate(app: &ui::App, palette: &Palette) {
             },
         ])),
     };
+    // Two people sitting in the lounge, one of them talking, so the nested
+    // voice rows and the speaking ring are both exercised.
+    let seat =
+        |id: &str, name: &str, muted: bool, deafened: bool, speaking: bool| ui::VoiceMember {
+            id: id.into(),
+            name: name.into(),
+            avatar: slint::Image::default(),
+            avatar_fallback: crate::format::avatar_colour(id, accent).to_slint(),
+            initials: crate::format::initials(name).into(),
+            muted,
+            deafened,
+            streaming: false,
+            video: false,
+            speaking,
+        };
+    let lounge_seats = vec![
+        seat("u2", "Grace Hopper", false, false, true),
+        seat("u3", "Alan Turing", true, false, false),
+    ];
+
     let voice = ui::CategoryRow {
         id: "c2".into(),
         name: "VOICE".into(),
@@ -171,6 +192,7 @@ pub fn populate(app: &ui::App, palette: &Palette) {
         channels: ModelRc::new(VecModel::from(vec![
             ui::ChannelRow {
                 voice_count: 2,
+                voice_members: ModelRc::new(VecModel::from(lounge_seats)),
                 ..channel("lounge", "Lounge", "voice", 0, 0)
             },
             channel("focus", "Focus room", "voice", 0, 0),
@@ -251,6 +273,13 @@ pub fn populate(app: &ui::App, palette: &Palette) {
     );
     app.set_messages(ModelRc::new(VecModel::from(rows)));
     app.set_loading_messages(false);
+
+    // Connected to voice, so the sidebar's panel is in the frame.
+    app.set_voice_live(true);
+    app.set_voice_channel("Lounge".into());
+    app.set_voice_summary("Voice connected".into());
+    app.set_voice_can_speak(true);
+    app.set_voice_can_screen_share(true);
 }
 
 /// Open one of the dialogs over the demo, for reviewing it headlessly.

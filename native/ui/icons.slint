@@ -79,7 +79,11 @@ export component Icon inherits Rectangle {
         commands: root.data;
         stroke: root.filled ? transparent : root.colour;
         fill: root.filled ? root.colour : transparent;
-        stroke-width: 2px * (24px / root.size);
+        // Lucide draws at 2 units of a 24-unit viewbox. Slint applies
+        // stroke-width in the element's own coordinates, so the 2 units are
+        // converted rather than used directly — the other way round makes
+        // every icon heavier the smaller it gets, which at 12px is a blob.
+        stroke-width: 2px * root.size / 24px;
         stroke-line-cap: round;
     }
 }

@@ -67,6 +67,9 @@ enum Task {
     },
     UpdateStatus(String),
     Typing(String),
+    JoinVoice {
+        channel: String,
+    },
     LoadOlder {
         channel: String,
         before: String,
@@ -113,6 +116,14 @@ enum Event {
         channel: String,
         messages: Vec<Message>,
     },
+    VoiceGrant {
+        channel: String,
+        grant: Box<crate::voice::Grant>,
+    },
+    VoiceFailed {
+        channel: String,
+        error: String,
+    },
 }
 
 /// Everything the UI thread owns.
@@ -157,6 +168,12 @@ struct AppState {
     /// top", which is what triggers a page back.
     content_height: f32,
     viewport_height: f32,
+    /// The member's own voice connection.
+    voice: crate::voice::Session,
+    /// The media engine, or the no-media one in a build without the feature.
+    engine: Box<dyn crate::voice::Engine>,
+    /// Who the engine last reported as speaking.
+    speaking: Vec<String>,
     /// When typing was last announced, per channel. The gateway notice is
     /// throttled: one keystroke per frame would be a frame per keystroke.
     typing_sent: std::collections::HashMap<String, i64>,
@@ -212,6 +229,9 @@ impl AppState {
             exhausted: Vec::new(),
             content_height: 0.0,
             viewport_height: 0.0,
+            voice: crate::voice::Session::default(),
+            engine: crate::voice::engine(),
+            speaking: Vec::new(),
             typing_sent: std::collections::HashMap::new(),
         }
     }
@@ -300,6 +320,25 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
             while let Ok(event) = event_rx.try_recv() {
                 dirty |= handle_event(event, &app, &state, &tasks);
             }
+
+            // Who is speaking comes from the media engine rather than the
+            // gateway — LiveKit knows within a frame or two, and the server
+            // is not told at all. Polled here because it changes constantly
+            // and pushing every change would be a repaint per frame.
+            {
+                let mut state_ref = state.borrow_mut();
+                if state_ref.voice.is_live() {
+                    let speaking = state_ref.engine.speaking();
+                    if speaking != state_ref.speaking {
+                        state_ref.speaking = speaking;
+                        dirty = true;
+                    }
+                } else if !state_ref.speaking.is_empty() {
+                    state_ref.speaking.clear();
+                    dirty = true;
+                }
+            }
+
             if dirty {
                 refresh(&app, &state, &tasks);
             }
@@ -561,6 +600,27 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 }
             }
 
+            Task::JoinVoice { channel } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    // The instance decides what this member may do in this
+                    // channel, so the grant is asked for rather than
+                    // assembled from the instance-wide permissions.
+                    let _ = match client.voice_grant(&channel).await {
+                        Ok(grant) => events.send(Event::VoiceGrant {
+                            channel,
+                            grant: Box::new(grant),
+                        }),
+                        Err(error) => events.send(Event::VoiceFailed {
+                            channel,
+                            error: error.to_string(),
+                        }),
+                    };
+                });
+            }
+
             Task::LoadOlder { channel, before } => {
                 let (Some(client), events) = (client.clone(), events.clone()) else {
                     continue;
@@ -802,6 +862,39 @@ fn handle_event(
             true
         }
 
+        Event::VoiceGrant { channel, grant } => {
+            let mut state_ref = state.borrow_mut();
+            state_ref.voice.joining(&channel, &grant);
+            let muted = state_ref.voice.muted;
+
+            let outcome = state_ref.engine.connect(&grant, muted);
+            state_ref.voice.status = match outcome {
+                Ok(()) if crate::voice::has_media() => crate::voice::Status::Connected,
+                // The control plane joined; this build has no media. Not an
+                // error — the member is in the channel and visible to
+                // everyone else.
+                Ok(()) => crate::voice::Status::ControlOnly,
+                Err(error) => {
+                    state_ref.voice.notice = error;
+                    crate::voice::Status::Failed
+                }
+            };
+            if state_ref.voice.status == crate::voice::Status::ControlOnly {
+                state_ref.voice.notice =
+                    "This build carries no audio. See native/README.md.".into();
+            }
+            true
+        }
+
+        Event::VoiceFailed { channel, error } => {
+            let mut state_ref = state.borrow_mut();
+            state_ref.voice.left();
+            state_ref.voice.status = crate::voice::Status::Failed;
+            state_ref.voice.channel = channel;
+            state_ref.voice.notice = error;
+            true
+        }
+
         Event::SearchResults(hits) | Event::Pins(hits) => {
             let mut state = state.borrow_mut();
             state.panel_hits = hits;
@@ -893,6 +986,35 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
     ));
 
     // --- channels --------------------------------------------------------
+    // Who is sitting in a voice channel, with what LiveKit last reported
+    // about who is talking.
+    let voice_members = |channel_id: &str| -> Vec<ui::VoiceMember> {
+        store
+            .voice_states
+            .iter()
+            .filter(|s| s.channel_id == channel_id)
+            .filter_map(|voice| {
+                let member = store.member(&voice.user_id)?;
+                Some(ui::VoiceMember {
+                    id: member.id.clone().into(),
+                    name: member.name().into(),
+                    avatar: member
+                        .avatar_url
+                        .as_deref()
+                        .map(|url| state_ref.images.get_or_blank(url))
+                        .unwrap_or_default(),
+                    avatar_fallback: crate::format::avatar_colour(&member.id, accent).to_slint(),
+                    initials: crate::format::initials(member.name()).into(),
+                    muted: voice.muted,
+                    deafened: voice.deafened,
+                    streaming: voice.streaming,
+                    video: voice.video,
+                    speaking: state_ref.speaking.iter().any(|id| id == &member.id),
+                })
+            })
+            .collect()
+    };
+
     let to_channel = |channel: &Channel| ui::ChannelRow {
         id: channel.id.clone().into(),
         name: channel.name.clone().into(),
@@ -912,6 +1034,7 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
             .iter()
             .filter(|s| s.channel_id == channel.id)
             .count() as i32,
+        voice_members: ModelRc::new(VecModel::from(voice_members(&channel.id))),
     };
 
     let loose: Vec<ui::ChannelRow> = store
@@ -1180,6 +1303,23 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
         ThemeChoice::Instance => 2,
     });
 
+    // --- voice ------------------------------------------------------------
+    let voice = &state_ref.voice;
+    app.set_voice_live(voice.is_live() || voice.status == crate::voice::Status::Connecting);
+    app.set_voice_channel(
+        store
+            .channel(&voice.channel)
+            .map(|c| SharedString::from(c.name.as_str()))
+            .unwrap_or_default(),
+    );
+    app.set_voice_summary(voice.summary().into());
+    app.set_voice_muted(voice.muted);
+    app.set_voice_deafened(voice.deafened);
+    app.set_voice_can_speak(voice.can_speak);
+    app.set_voice_can_screen_share(voice.can_screen_share);
+    app.set_voice_screen_sharing(voice.screen_sharing);
+    app.set_voice_notice(voice.notice.clone().into());
+
     app.set_scroll_to_newest(state_ref.scroll_token);
 
     queue_images(&state_ref, tasks);
@@ -1269,6 +1409,24 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             let Some(app) = weak.upgrade() else { return };
             let id = id.to_string();
             let mut state_ref = state.borrow_mut();
+
+            // A voice channel is joined, not opened: it has no message list,
+            // and clicking it while already in it does nothing rather than
+            // reconnecting.
+            if state_ref.store.channel(&id).map(|c| c.kind) == Some(ChannelKind::Voice) {
+                if state_ref.voice.channel == id && state_ref.voice.is_live() {
+                    return;
+                }
+                state_ref.engine.disconnect();
+                state_ref.voice.left();
+                state_ref.voice.status = crate::voice::Status::Connecting;
+                state_ref.voice.channel = id.clone();
+                drop(state_ref);
+                let _ = tasks.send(Task::JoinVoice { channel: id });
+                refresh(&app, &state, &tasks);
+                return;
+            }
+
             if state_ref.store.selected_channel == id {
                 return;
             }
@@ -1480,6 +1638,66 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                 message: id.to_string(),
                 pinned: !pinned,
             });
+        }
+    });
+
+    // --- voice ---------------------------------------------------------------
+    app.on_toggle_mute({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let next = !state_ref.voice.muted;
+            state_ref.voice.set_muted(next);
+            let muted = state_ref.voice.muted;
+            let deafened = state_ref.voice.deafened;
+            state_ref.engine.set_muted(muted);
+            state_ref.engine.set_deafened(deafened);
+            drop(state_ref);
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_toggle_deafen({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let next = !state_ref.voice.deafened;
+            state_ref.voice.set_deafened(next);
+            let muted = state_ref.voice.muted;
+            state_ref.engine.set_deafened(next);
+            state_ref.engine.set_muted(muted);
+            drop(state_ref);
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_toggle_screen_share({
+        move || {
+            // The capture half already exists, in Rust, in
+            // desktop/src/capture.rs; what is missing is the media engine to
+            // publish it through. See src/voice.rs.
+            eprintln!("minichat: screen sharing needs the voice feature");
+        }
+    });
+
+    app.on_leave_voice({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            state_ref.engine.disconnect();
+            state_ref.voice.left();
+            state_ref.speaking.clear();
+            drop(state_ref);
+            refresh(&app, &state, &tasks);
         }
     });
 

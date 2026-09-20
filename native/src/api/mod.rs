@@ -464,6 +464,67 @@ fn encode(value: &str) -> String {
     percent_encoding::utf8_percent_encode(value, percent_encoding::NON_ALPHANUMERIC).to_string()
 }
 
+impl Client {
+    // --- direct messages -------------------------------------------------
+
+    pub async fn conversations(&self) -> Result<Vec<Conversation>> {
+        self.get("/direct").await
+    }
+
+    /// Open (or create) the conversation with a member.
+    pub async fn open_conversation(&self, peer: &str) -> Result<Conversation> {
+        self.post_empty(&format!("/direct/open/{}", encode(peer)))
+            .await
+    }
+
+    pub async fn direct_history(
+        &self,
+        conversation: &str,
+        before: Option<&str>,
+    ) -> Result<Vec<DirectMessage>> {
+        let suffix = match before {
+            Some(before) => format!("?before={}", encode(before)),
+            None => String::new(),
+        };
+        self.get(&format!(
+            "/direct/{}/messages{suffix}",
+            encode(conversation)
+        ))
+        .await
+    }
+
+    pub async fn send_direct(&self, conversation: &str, content: &str) -> Result<DirectMessage> {
+        self.post(
+            &format!("/direct/{}/messages", encode(conversation)),
+            json!({ "content": content }),
+        )
+        .await
+    }
+
+    pub async fn ack_direct(&self, conversation: &str, message: &str) -> Result<serde_json::Value> {
+        self.post(
+            &format!("/direct/{}/ack", encode(conversation)),
+            json!({ "message_id": message }),
+        )
+        .await
+    }
+}
+
+impl Client {
+    /// The LiveKit grant for a voice channel, or for a direct call.
+    ///
+    /// Direct calls use a different route, which the web client selects on
+    /// the `direct:` prefix; the same convention is kept here so a caller can
+    /// pass either kind of ID.
+    pub async fn voice_grant(&self, channel: &str) -> Result<crate::voice::Grant> {
+        let path = match channel.strip_prefix("direct:") {
+            Some(conversation) => format!("/direct/calls/{}/token", encode(conversation)),
+            None => format!("/voice/{}/token", encode(channel)),
+        };
+        self.post_empty(&path).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

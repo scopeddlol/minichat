@@ -99,6 +99,19 @@ export struct MessageRow {
     jumbo: bool,
 }
 
+export struct VoiceMember {
+    id: string,
+    name: string,
+    avatar: image,
+    avatar-fallback: color,
+    initials: string,
+    muted: bool,
+    deafened: bool,
+    streaming: bool,
+    video: bool,
+    speaking: bool,
+}
+
 export struct ChannelRow {
     id: string,
     name: string,
@@ -111,6 +124,7 @@ export struct ChannelRow {
     mentions: int,
     // Members currently in a voice channel, shown nested underneath.
     voice-count: int,
+    voice-members: [VoiceMember],
 }
 
 export struct CategoryRow {

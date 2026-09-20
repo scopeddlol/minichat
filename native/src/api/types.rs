@@ -583,6 +583,64 @@ pub struct AuthResponse {
     pub user_id: String,
 }
 
+// --- direct messages ----------------------------------------------------
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Conversation {
+    pub id: String,
+    #[serde(default)]
+    pub peer_id: String,
+    #[serde(default)]
+    pub last_content: Option<String>,
+    #[serde(default)]
+    pub unread: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct DirectMessage {
+    pub id: String,
+    #[serde(default)]
+    pub conversation_id: String,
+    #[serde(default)]
+    pub author_id: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub created_at: String,
+
+    /// Local-only, while a message is in flight.
+    #[serde(skip)]
+    pub pending: bool,
+    #[serde(skip)]
+    pub failed: bool,
+}
+
+impl DirectMessage {
+    /// A direct message as an ordinary one, so the message list can draw it
+    /// without a second renderer. The conversation is the channel, and the
+    /// author is resolved from the member list by the view builder.
+    pub fn as_message(&self, author: Option<&Member>) -> Message {
+        Message {
+            id: self.id.clone(),
+            channel_id: self.conversation_id.clone(),
+            author: author.map(|member| MessageAuthor {
+                id: member.id.clone(),
+                username: member.username.clone(),
+                display_name: member.display_name.clone(),
+                avatar_url: member.avatar_url.clone(),
+                accent_color: member.accent_color.clone(),
+                is_operator: member.is_operator,
+                roles: member.roles.clone(),
+            }),
+            content: self.content.clone(),
+            created_at: self.created_at.clone(),
+            pending: self.pending,
+            failed: self.failed,
+            ..Default::default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

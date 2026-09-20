@@ -235,6 +235,22 @@ export component App inherits Window {
     in property <bool> inbox-open;
     in property <string> connection: "ready";
 
+    // --- voice ------------------------------------------------------------
+    in property <bool> voice-live;
+    in property <string> voice-channel;
+    in property <string> voice-summary;
+    in property <bool> voice-muted;
+    in property <bool> voice-deafened;
+    in property <bool> voice-can-speak;
+    in property <bool> voice-can-screen-share;
+    in property <bool> voice-screen-sharing;
+    in property <string> voice-notice;
+
+    callback toggle-mute();
+    callback toggle-deafen();
+    callback toggle-screen-share();
+    callback leave-voice();
+
     // --- me --------------------------------------------------------------
     in property <string> my-name;
     in property <string> my-status;
@@ -381,6 +397,20 @@ export component App inherits Window {
                 my-initials: root.my-initials;
                 my-presence: root.my-presence;
                 connection: root.connection;
+                voice-live: root.voice-live;
+                voice-channel: root.voice-channel;
+                voice-summary: root.voice-summary;
+                voice-muted: root.voice-muted;
+                voice-deafened: root.voice-deafened;
+                voice-can-speak: root.voice-can-speak;
+                voice-can-screen-share: root.voice-can-screen-share;
+                voice-screen-sharing: root.voice-screen-sharing;
+                voice-notice: root.voice-notice;
+                toggle-mute => { root.toggle-mute(); }
+                toggle-deafen => { root.toggle-deafen(); }
+                toggle-screen-share => { root.toggle-screen-share(); }
+                leave-voice => { root.leave-voice(); }
+                open-member(id) => { root.open-member(id); }
                 select-channel(id) => { root.select-channel(id); }
                 toggle-category(id) => { root.toggle-category(id); }
                 open-inbox => { root.open-inbox(); }

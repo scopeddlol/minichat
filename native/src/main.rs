@@ -14,6 +14,7 @@ mod store;
 mod text;
 mod theme;
 mod view;
+mod voice;
 
 /// The types Slint generated from `ui/*.slint`.
 pub mod ui {

@@ -169,6 +169,7 @@ pub fn populate(app: &crate::ui::App, store: &Store, palette: &crate::theme::Pal
         unread: store.unread.get(&channel.id).copied().unwrap_or(0) as i32,
         mentions: store.mentions.get(&channel.id).copied().unwrap_or(0) as i32,
         voice_count: 0,
+        voice_members: ModelRc::new(VecModel::from(Vec::<ui::VoiceMember>::new())),
     };
 
     app.set_loose_channels(ModelRc::new(VecModel::from(
