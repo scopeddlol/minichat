@@ -11,7 +11,10 @@ default-run = "minichat-native"
 slint = { version = "~1.18", default-features = false, features = [
     "compat-1-2",
     "backend-winit",
-    "renderer-skia",
+    # Skia and libwebrtc both bundle libjpeg, causing duplicate symbols in
+    # voice-enabled release builds. FemtoVG keeps GPU rendering without that
+    # second native codec library.
+    "renderer-femtovg",
     "renderer-software",
     "std",
     # Registering the bundled faces at run time. Slint 1.18 exposes the shared

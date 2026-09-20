@@ -1,0 +1,4 @@
+# Match LiveKit's prebuilt WebRTC library and its C++ bridge on Windows.
+# Scoped to the native crate; the Tauri shell does not use LiveKit.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

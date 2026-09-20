@@ -33,6 +33,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     format::init_local_offset();
     let args: Vec<String> = std::env::args().collect();
 
+    // Exercise the shipped GPU renderer as well as the headless layout path.
+    if args.get(1).is_some_and(|arg| arg == "--screenshot-window") {
+        use slint::ComponentHandle;
+        let path = args
+            .get(2)
+            .ok_or("--screenshot-window requires a PNG path")?
+            .clone();
+        slint::BackendSelector::new()
+            .backend_name("winit".into())
+            .renderer_name("femtovg".into())
+            .select()?;
+        fonts::register();
+        let app = App::new()?;
+        let palette = theme::Palette::resolve(&theme::Branding::default());
+        theme::apply(&app, &palette);
+        demo::populate(&app, &palette);
+        app.window().set_size(slint::PhysicalSize::new(1180, 820));
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_secs(1), move || {
+            let app = weak.upgrade().expect("render window closed before capture");
+            let pixels = app.window().take_snapshot().expect("GPU snapshot failed");
+            image::save_buffer(
+                &path,
+                pixels.as_bytes(),
+                pixels.width(),
+                pixels.height(),
+                image::ColorType::Rgba8,
+            )
+            .expect("could not save GPU snapshot");
+            slint::quit_event_loop().expect("could not exit render check");
+        });
+        app.run()?;
+        return Ok(());
+    }
+
     // `--live <origin> <user> <pass> [out.png]` signs in to a real instance
     // and renders what it sent. See src/live.rs.
     if let Some(index) = args.iter().position(|a| a == "--live") {

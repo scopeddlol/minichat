@@ -9,6 +9,7 @@
 - An admin panel, direct calls, voice media with real audio, and global voice hotkeys in the native client.
 - The Windows installers are branded, and are now built on every change rather than only at a tag, so a bundle that cannot be packaged is caught before a release depends on it. The installer's `/INSTANCE` switch is parsed without `GetOptions`.
 - Fixed the CI failures on the voice job and two clippy lints.
+- Fixed voice-enabled release linking on both platforms: the native UI uses FemtoVG to avoid Skia/WebRTC JPEG symbol collisions, and Windows uses the static MSVC runtime required by LiveKit. Release render checks run on both Linux and Windows.
 
 ### Deployment
 

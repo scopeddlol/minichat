@@ -261,7 +261,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev \
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            libasound2-dev libglib2.0-dev
+            libasound2-dev libglib2.0-dev xvfb xauth libgl1-mesa-dri
 
       # libwebrtc ships a hermetic libc++ that needs clang 21 to link, and
       # Ubuntu tops out at 18. Windows links against MSVC and needs none of it.
@@ -283,13 +283,29 @@ jobs:
       # client has actually had. The software renderer needs no display, so the
       # check costs one frame.
       - name: Check it still renders
-        if: runner.os == 'Linux'
+        shell: bash
         working-directory: native
         run: |
           ./target/release/minichat-native --screenshot release-check.png 1180 820
           size=$(stat -c%s release-check.png)
           echo "release-check.png: $size bytes"
           [ "$size" -gt 20000 ] || { echo "::error::the release build renders blank"; exit 1; }
+
+      - name: Check the GPU renderer
+        if: runner.os == 'Linux'
+        working-directory: native
+        run: |
+          LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a timeout 30s \
+            ./target/release/minichat-native --screenshot-window release-gpu.png
+          [ "$(stat -c%s release-gpu.png)" -gt 20000 ]
+
+      - name: Upload release render checks
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-release-renders-${{ matrix.label }}
+          path: native/release-*.png
+          if-no-files-found: error
+          retention-days: 14
 
       # The fonts are compiled into the binary, so their licences travel with
       # it rather than staying in the repository.

@@ -50,7 +50,7 @@ cargo run -- --screenshot shot.png 1180 820 --overlay settings
 ```
 
 The screenshot path renders through Slint's software renderer rather than
-Skia, so it previews layout, colour and type rather than capturing the release
+FemtoVG, so it previews layout, colour and type rather than capturing the release
 build pixel for pixel. It is how several layout bugs in this client were
 found, including every dialog collapsing to its title bar.
 
@@ -182,7 +182,7 @@ of which 2.3 MB is the bundled fonts, and it has no runtime to install
 alongside it.
 
 Two caveats on that number, because it was taken in a container: it is the
-software renderer, since there is no GPU there — Skia on a real one moves
+software renderer, since there is no GPU there — FemtoVG on a real one moves
 work to the GPU rather than adding to resident memory, but it is not the same
 measurement. And it is a small instance with a handful of messages and no
 images loaded; the caps in `store.rs` and `images.rs` are what keep a busy one
@@ -204,8 +204,9 @@ cargo build --features voice
 That pulls in `livekit` and, under it, roughly 200MB of prebuilt libwebrtc.
 Linking it on Linux needs **clang 21 or newer** — the hermetic libc++ the
 artifact ships with requires it, and Ubuntu 24.04 tops out at 18, so a Linux
-build wants a toolchain from apt.llvm.org. Windows links against MSVC and has
-no such constraint. The feature is off by default so that everything else in
+build wants a toolchain from apt.llvm.org. Windows uses the static MSVC runtime,
+configured in `.cargo/config.toml` to match LiveKit's prebuilt library; run
+Cargo from this `native/` directory so it picks up that configuration. The feature is off by default so that everything else in
 this client — the whole control plane included — builds, tests and ships
 without a C++ toolchain.
 

@@ -6,7 +6,7 @@
 //! build machine with no compositor — rather than by reading the markup and
 //! hoping.
 //!
-//! The software renderer is not what ships (Skia is), so this is a preview of
+//! The software renderer is not what ships (FemtoVG is), so this is a preview of
 //! layout, colour and type rather than a pixel-exact capture of the release
 //! build. Everything it gets wrong, it gets wrong consistently.
 
