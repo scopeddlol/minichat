@@ -12,18 +12,20 @@ import { ChatPane } from "chat.slint";
 import { MemberPanel } from "members.slint";
 import { Inbox } from "inbox.slint";
 import { CallPanel } from "call.slint";
+import { AdminPanel, AdminSection } from "admin.slint";
 import { Button, ButtonKind, TextField, FieldLabel, Avatar } from "controls.slint";
 import { Icon, Icons } from "icons.slint";
 import { SettingsDialog, ProfileDialog, ConfirmDialog, Lightbox, ForwardDialog } from "modals.slint";
 import { SidePanel, ContextMenu, EmojiPicker, SearchHit, EmojiEntry, EmojiRow, MenuItem } from "panels.slint";
 import {
     MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup, ConversationRow,
-    PendingAttachment
+    PendingAttachment, StatTile, StatRow, RoleRow, AdminMemberRow, InviteRow, BanRow, AuditRow
 } from "models.slint";
 
 export {
     Theme, MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup,
-    ConversationRow, SearchHit, EmojiEntry, EmojiRow, MenuItem, PendingAttachment
+    ConversationRow, SearchHit, EmojiEntry, EmojiRow, MenuItem, PendingAttachment,
+    AdminSection, StatTile, StatRow, RoleRow, AdminMemberRow, InviteRow, BanRow, AuditRow
 }
 
 // Which panel is open beside the chat, if any.
@@ -33,7 +35,7 @@ export enum SidePanelKind { none, search, pins }
 export enum Overlay { none, settings, profile, confirm, emoji, menu, lightbox, forward }
 
 // Which screen the window is showing.
-export enum Screen { connect, signin, chat }
+export enum Screen { connect, signin, chat, admin }
 
 component SignIn {
     in property <string> instance-name;
@@ -414,6 +416,36 @@ export component App inherits Window {
     callback menu-chose(string);
     callback message-member(string);
 
+    // --- administration ---------------------------------------------------
+    in property <[AdminSection]> admin-sections;
+    in property <string> admin-section: "overview";
+    in property <[StatRow]> admin-tiles;
+    in property <[AdminMemberRow]> admin-members;
+    in property <[RoleRow]> admin-roles;
+    in property <[InviteRow]> admin-invites;
+    in property <[BanRow]> admin-bans;
+    in property <[AuditRow]> admin-audit;
+    in property <bool> admin-loading;
+    in property <bool> admin-saving;
+    in property <string> admin-notice;
+    in property <AdminMemberRow> admin-picked;
+    in property <bool> admin-has-picked;
+    in-out property <string> form-name;
+    in-out property <string> form-tagline;
+    in-out property <string> form-accent;
+
+    callback close-admin();
+    callback choose-admin-section(string);
+    callback pick-admin-member(string);
+    callback toggle-role(string, string, bool);
+    callback kick-member(string);
+    callback ban-member(string);
+    callback unban-member(string);
+    callback create-invite();
+    callback revoke-invite(string);
+    callback copy-invite(string);
+    callback save-instance();
+
     callback minimise();
     callback toggle-maximise();
     callback quit();
@@ -537,6 +569,39 @@ export component App inherits Window {
             sign-in => { root.sign-in(); }
             register => { root.register(); }
             back => { root.forget-instance(); }
+        }
+
+        if root.screen == Screen.admin: AdminPanel {
+            width: screen.width;
+            height: screen.height;
+            sections: root.admin-sections;
+            section: root.admin-section;
+            instance-name: root.instance-name;
+            tiles: root.admin-tiles;
+            members: root.admin-members;
+            roles: root.admin-roles;
+            invites: root.admin-invites;
+            bans: root.admin-bans;
+            audit: root.admin-audit;
+            loading: root.admin-loading;
+            form-name <=> root.form-name;
+            form-tagline <=> root.form-tagline;
+            form-accent <=> root.form-accent;
+            saving: root.admin-saving;
+            save-notice: root.admin-notice;
+            picked: root.admin-picked;
+            has-picked: root.admin-has-picked;
+            dismissed => { root.close-admin(); }
+            choose-section(id) => { root.choose-admin-section(id); }
+            pick-member(id) => { root.pick-admin-member(id); }
+            toggle-role(user, role, granted) => { root.toggle-role(user, role, granted); }
+            kick(id) => { root.kick-member(id); }
+            ban(id) => { root.ban-member(id); }
+            unban(id) => { root.unban-member(id); }
+            create-invite => { root.create-invite(); }
+            revoke-invite(code) => { root.revoke-invite(code); }
+            copy-invite(url) => { root.copy-invite(url); }
+            save-instance => { root.save-instance(); }
         }
 
         if root.screen == Screen.chat: HorizontalLayout {

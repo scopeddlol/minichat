@@ -403,6 +403,79 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             app.set_direct_messages(app.get_messages());
             app.set_loading_direct(false);
         }
+        "admin" => {
+            app.set_screen(ui::Screen::Admin);
+            app.set_admin_section("overview".into());
+            let section = |id: &str, label: &str| ui::AdminSection {
+                id: id.into(),
+                label: label.into(),
+            };
+            app.set_admin_sections(ModelRc::new(VecModel::from(vec![
+                section("overview", "Overview"),
+                section("instance", "Instance"),
+                section("members", "Members"),
+                section("roles", "Roles"),
+                section("invites", "Invites"),
+                section("bans", "Bans"),
+                section("audit", "Audit log"),
+            ])));
+            let tile = |label: &str, value: &str, detail: &str| ui::StatTile {
+                label: label.into(),
+                value: value.into(),
+                detail: detail.into(),
+            };
+            let tiles = vec![
+                tile("MEMBERS", "5", "4 online"),
+                tile("MESSAGES", "1,284", "96 this week"),
+                tile("CHANNELS", "6", ""),
+                tile("STORAGE", "41 MB", ""),
+                tile("JOINED", "2", "in the last week"),
+                tile("IN VOICE", "2", ""),
+            ];
+            app.set_admin_tiles(ModelRc::new(VecModel::from(
+                tiles
+                    .chunks(4)
+                    .map(|chunk| ui::StatRow {
+                        tiles: ModelRc::new(VecModel::from(chunk.to_vec())),
+                    })
+                    .collect::<Vec<_>>(),
+            )));
+        }
+        "admin-members" => {
+            show_overlay(app, "admin");
+            app.set_admin_section("members".into());
+            let groups = app.get_member_groups();
+            let mut rows: Vec<ui::AdminMemberRow> = Vec::new();
+            for g in 0..groups.row_count() {
+                let Some(group) = groups.row_data(g) else {
+                    continue;
+                };
+                for m in 0..group.members.row_count() {
+                    let Some(member) = group.members.row_data(m) else {
+                        continue;
+                    };
+                    rows.push(ui::AdminMemberRow {
+                        id: member.id.clone(),
+                        name: member.name.clone(),
+                        username: member.name.to_lowercase().replace(' ', "").into(),
+                        avatar: member.avatar.clone(),
+                        avatar_fallback: member.avatar_fallback,
+                        initials: member.initials.clone(),
+                        presence: member.presence.clone(),
+                        roles: if m == 0 {
+                            "Maintainer".into()
+                        } else {
+                            SharedString::new()
+                        },
+                        joined: "4 Mar".into(),
+                        operator: member.operator,
+                        can_kick: !member.operator,
+                        can_ban: !member.operator,
+                    });
+                }
+            }
+            app.set_admin_members(ModelRc::new(VecModel::from(rows)));
+        }
         "ringing" => {
             let groups = app.get_member_groups();
             if let Some(member) = groups.row_data(0).and_then(|g| g.members.row_data(1)) {

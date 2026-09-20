@@ -176,3 +176,68 @@ export struct ConversationRow {
     presence: string,
     unread: int,
 }
+
+// --- administration -----------------------------------------------------
+
+export struct StatTile {
+    label: string,
+    value: string,
+    detail: string,
+}
+
+/// One row of the overview's tile grid.
+export struct StatRow {
+    tiles: [StatTile],
+}
+
+export struct RoleRow {
+    id: string,
+    name: string,
+    colour: color,
+    coloured: bool,
+    badge: string,
+    members: int,
+    /// Whether the signed-in member may grant or remove this role, which is
+    /// a question of rank rather than of permission alone.
+    assignable: bool,
+    granted: bool,
+}
+
+export struct AdminMemberRow {
+    id: string,
+    name: string,
+    username: string,
+    avatar: image,
+    avatar-fallback: color,
+    initials: string,
+    presence: string,
+    roles: string,
+    joined: string,
+    operator: bool,
+    can-kick: bool,
+    can-ban: bool,
+}
+
+export struct InviteRow {
+    code: string,
+    url: string,
+    note: string,
+    uses: string,
+    expires: string,
+    revoked: bool,
+}
+
+export struct BanRow {
+    user-id: string,
+    name: string,
+    reason: string,
+    when: string,
+}
+
+export struct AuditRow {
+    id: string,
+    actor: string,
+    action: string,
+    detail: string,
+    when: string,
+}

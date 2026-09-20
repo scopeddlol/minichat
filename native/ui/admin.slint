@@ -1,0 +1,684 @@
+// The admin panel.
+//
+// A full-window surface rather than a dialog: it has more in it than a card
+// can hold, and every section is a list. Which sections appear follows the
+// member's permissions, so nothing here offers an action the server refuses.
+
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+import {
+    Avatar, Button, ButtonKind, CountPill, Divider, FieldLabel, IconButton,
+    NavLabel, TextField
+} from "controls.slint";
+import {
+    StatTile, StatRow, RoleRow, AdminMemberRow, InviteRow, BanRow, AuditRow
+} from "models.slint";
+
+export struct AdminSection {
+    id: string,
+    label: string,
+}
+
+component Tile {
+    in property <StatTile> tile;
+
+    width: 168px;
+    height: 88px;
+
+    Rectangle {
+        background: Theme.surface-1;
+        border-radius: Theme.radius-card;
+        border-width: 1px;
+        border-color: Theme.border;
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 3px;
+            alignment: center;
+
+            Text {
+                text: root.tile.label;
+                color: Theme.text-faint;
+                font-size: 10.5px;
+                font-weight: 650;
+                letter-spacing: 0.9px;
+            }
+            Text {
+                text: root.tile.value;
+                color: Theme.text;
+                font-size: 24px;
+                font-weight: 650;
+            }
+            if root.tile.detail != "": Text {
+                text: root.tile.detail;
+                color: Theme.text-faint;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+// A row in any of the admin lists: a name, some detail, and actions.
+component ListRow {
+    in property <bool> alternate: false;
+    height: 54px;
+
+    Rectangle {
+        background: touch.has-hover ? Theme.surface-2
+            : root.alternate ? Theme.surface-1 : transparent;
+        border-radius: Theme.radius-control;
+        animate background { duration: Theme.normal; }
+        @children
+    }
+    touch := TouchArea { mouse-cursor: MouseCursor.default; }
+}
+
+export component AdminPanel {
+    in property <[AdminSection]> sections;
+    in property <string> section;
+    in property <string> instance-name;
+
+    in property <[StatRow]> tiles;
+    in property <[AdminMemberRow]> members;
+    in property <[RoleRow]> roles;
+    in property <[InviteRow]> invites;
+    in property <[BanRow]> bans;
+    in property <[AuditRow]> audit;
+    in property <bool> loading;
+
+    // The instance form.
+    in-out property <string> form-name;
+    in-out property <string> form-tagline;
+    in-out property <string> form-accent;
+    in property <bool> saving;
+    in property <string> save-notice;
+
+    // The member picked out of the list, whose roles are being edited.
+    in property <AdminMemberRow> picked;
+    in property <bool> has-picked;
+
+    callback dismissed();
+    callback choose-section(string);
+    callback pick-member(string);
+    callback toggle-role(string, string, bool);
+    callback kick(string);
+    callback ban(string);
+    callback unban(string);
+    callback create-invite();
+    callback revoke-invite(string);
+    callback copy-invite(string);
+    callback save-instance();
+
+    Rectangle {
+        background: Theme.bg;
+
+        HorizontalLayout {
+            spacing: 0px;
+
+            // --- sections -------------------------------------------------
+            Rectangle {
+                width: 220px;
+                background: Theme.surface-0;
+
+                VerticalLayout {
+                    Rectangle {
+                        height: 56px;
+                        HorizontalLayout {
+                            padding-left: 18px;
+                            padding-right: 10px;
+                            spacing: 9px;
+                            Icon {
+                                data: Icons.dashboard;
+                                size: 16px;
+                                colour: Theme.text-faint;
+                                y: (parent.height - self.height) / 2;
+                            }
+                            Text {
+                                text: "Administration";
+                                color: Theme.text;
+                                font-size: 13.5px;
+                                font-weight: 650;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                    Divider {}
+
+                    VerticalLayout {
+                        alignment: start;
+                        padding: 8px;
+                        spacing: 2px;
+                        for entry in root.sections: Rectangle {
+                            height: 38px;
+                            background: entry.id == root.section ? Theme.surface-2
+                                : pick.has-hover ? Theme.surface-1 : transparent;
+                            border-radius: Theme.radius-control;
+                            animate background { duration: Theme.normal; }
+
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                spacing: 10px;
+                                Icon {
+                                    // Resolved here rather than passed in:
+                                    // the icon set is a Slint global, and
+                                    // exporting it just to name six glyphs
+                                    // is not worth the surface.
+                                    data: entry.id == "overview" ? Icons.dashboard
+                                        : entry.id == "instance" ? Icons.settings
+                                        : entry.id == "members" ? Icons.users
+                                        : entry.id == "roles" ? Icons.shield
+                                        : entry.id == "invites" ? Icons.user-plus
+                                        : entry.id == "bans" ? Icons.ban
+                                        : Icons.scroll-text;
+                                    size: 15px;
+                                    colour: entry.id == root.section
+                                        ? Theme.text : Theme.text-faint;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                                Text {
+                                    text: entry.label;
+                                    color: entry.id == root.section
+                                        ? Theme.text : Theme.text-muted;
+                                    font-size: 13.4px;
+                                    font-weight: entry.id == root.section ? 650 : 500;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+
+                            pick := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => { root.choose-section(entry.id); }
+                            }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                    Divider {}
+                    Rectangle {
+                        height: 54px;
+                        HorizontalLayout {
+                            padding: 10px;
+                            Button {
+                                label: "Back to chat";
+                                kind: ButtonKind.ghost;
+                                icon: Icons.arrow-left;
+                                wide: true;
+                                height: 34px;
+                                clicked => { root.dismissed(); }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: parent.width - 1px;
+                    width: 1px;
+                    background: Theme.border-soft;
+                }
+            }
+
+            // --- the chosen section ----------------------------------------
+            Rectangle {
+                horizontal-stretch: 1;
+
+                Flickable {
+                    content-height: body.preferred-height;
+
+                    body := VerticalLayout {
+                        alignment: start;
+                        padding-left: 28px;
+                        padding-right: 28px;
+                        padding-top: 24px;
+                        padding-bottom: 32px;
+                        spacing: 0px;
+
+                        // --- overview ---------------------------------------
+                        if root.section == "overview": VerticalLayout {
+                            spacing: 0px;
+                            Text {
+                                text: root.instance-name;
+                                color: Theme.text;
+                                font-size: 22px;
+                                font-weight: 650;
+                            }
+                            Rectangle { height: 18px; }
+
+                            // A wrapping grid is not a thing Slint has, so
+                            // the tiles are chunked into rows in Rust — the
+                            // same reason the emoji picker is.
+                            for row in root.tiles: HorizontalLayout {
+                                spacing: 12px;
+                                alignment: start;
+                                height: 100px;
+                                for tile in row.tiles: Tile { tile: tile; }
+                            }
+                        }
+
+                        // --- instance ---------------------------------------
+                        if root.section == "instance": VerticalLayout {
+                            spacing: 0px;
+                            Text {
+                                text: "Instance";
+                                color: Theme.text;
+                                font-size: 22px;
+                                font-weight: 650;
+                            }
+                            Rectangle { height: 20px; }
+
+                            FieldLabel { text: "NAME"; }
+                            Rectangle { height: 6px; }
+                            TextField { text <=> root.form-name; }
+                            Rectangle { height: 14px; }
+
+                            FieldLabel { text: "TAGLINE"; }
+                            Rectangle { height: 6px; }
+                            TextField {
+                                text <=> root.form-tagline;
+                                placeholder: "A line under the name";
+                            }
+                            Rectangle { height: 14px; }
+
+                            FieldLabel { text: "ACCENT COLOUR"; }
+                            Rectangle { height: 6px; }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                height: 38px;
+                                TextField {
+                                    text <=> root.form-accent;
+                                    placeholder: "#5b6ee8";
+                                }
+                                // A live swatch, so a typo is visible before
+                                // it is saved and retints the whole app.
+                                Rectangle {
+                                    width: 38px;
+                                    height: 38px;
+                                    border-radius: Theme.radius-control;
+                                    border-width: 1px;
+                                    border-color: Theme.border;
+                                    background: Theme.accent;
+                                }
+                            }
+
+                            Rectangle { height: 20px; }
+                            HorizontalLayout {
+                                height: 38px;
+                                spacing: 10px;
+                                alignment: start;
+                                Button {
+                                    label: root.saving ? "Saving\u{2026}" : "Save changes";
+                                    kind: ButtonKind.primary;
+                                    busy: root.saving;
+                                    clicked => { root.save-instance(); }
+                                }
+                                if root.save-notice != "": Text {
+                                    text: root.save-notice;
+                                    color: Theme.text-faint;
+                                    font-size: 12.3px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // --- members -----------------------------------------
+                        if root.section == "members": VerticalLayout {
+                            spacing: 0px;
+                            Text {
+                                text: "Members";
+                                color: Theme.text;
+                                font-size: 22px;
+                                font-weight: 650;
+                            }
+                            Rectangle { height: 16px; }
+
+                            for member[index] in root.members: ListRow {
+                                alternate: mod(index, 2) == 1;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 10px;
+                                    spacing: 12px;
+
+                                    Avatar {
+                                        size: 32px;
+                                        picture: member.avatar;
+                                        fallback: member.avatar-fallback;
+                                        initials: member.initials;
+                                        presence: member.presence;
+                                        name: member.name;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        horizontal-stretch: 1;
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            alignment: start;
+                                            Text {
+                                                text: member.name;
+                                                color: Theme.text;
+                                                font-size: 13.4px;
+                                                font-weight: 600;
+                                                overflow: elide;
+                                            }
+                                            if member.operator: Icon {
+                                                data: Icons.shield;
+                                                size: 12px;
+                                                colour: Theme.accent;
+                                                y: (parent.height - self.height) / 2;
+                                            }
+                                        }
+                                        Text {
+                                            text: member.roles != "" ? member.roles
+                                                : "@" + member.username;
+                                            color: Theme.text-faint;
+                                            font-size: 11.5px;
+                                            overflow: elide;
+                                        }
+                                    }
+
+                                    Button {
+                                        label: "Roles";
+                                        kind: ButtonKind.ghost;
+                                        height: 32px;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.pick-member(member.id); }
+                                    }
+                                    if member.can-kick: Button {
+                                        label: "Kick";
+                                        kind: ButtonKind.ghost;
+                                        height: 32px;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.kick(member.id); }
+                                    }
+                                    if member.can-ban: Button {
+                                        label: "Ban";
+                                        kind: ButtonKind.danger;
+                                        height: 32px;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.ban(member.id); }
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- roles, for the picked member ----------------------
+                        if root.section == "roles": VerticalLayout {
+                            spacing: 0px;
+                            Text {
+                                text: "Roles";
+                                color: Theme.text;
+                                font-size: 22px;
+                                font-weight: 650;
+                            }
+                            Rectangle { height: 6px; }
+                            Text {
+                                text: root.has-picked
+                                    ? "Granting and removing roles for " + root.picked.name + "."
+                                    : "Pick a member under Members to change their roles.";
+                                color: Theme.text-muted;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                            Rectangle { height: 16px; }
+
+                            for role[index] in root.roles: ListRow {
+                                alternate: mod(index, 2) == 1;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 10px;
+                                    spacing: 12px;
+
+                                    Rectangle {
+                                        width: 12px;
+                                        height: 12px;
+                                        border-radius: 6px;
+                                        background: role.coloured ? role.colour : Theme.surface-3;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        horizontal-stretch: 1;
+                                        Text {
+                                            text: role.name;
+                                            color: role.coloured ? role.colour : Theme.text;
+                                            font-size: 13.4px;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: role.members + " member(s)";
+                                            color: Theme.text-faint;
+                                            font-size: 11.5px;
+                                        }
+                                    }
+
+                                    if root.has-picked: Button {
+                                        label: role.granted ? "Remove" : "Grant";
+                                        kind: role.granted ? ButtonKind.ghost : ButtonKind.subtle;
+                                        enabled: role.assignable;
+                                        height: 32px;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => {
+                                            root.toggle-role(root.picked.id, role.id, !role.granted);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- invites -------------------------------------------
+                        if root.section == "invites": VerticalLayout {
+                            spacing: 0px;
+                            HorizontalLayout {
+                                height: 38px;
+                                spacing: 12px;
+                                Text {
+                                    text: "Invites";
+                                    color: Theme.text;
+                                    font-size: 22px;
+                                    font-weight: 650;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Button {
+                                    label: "New invite";
+                                    kind: ButtonKind.primary;
+                                    icon: Icons.plus;
+                                    height: 38px;
+                                    clicked => { root.create-invite(); }
+                                }
+                            }
+                            Rectangle { height: 16px; }
+
+                            if root.invites.length == 0: Text {
+                                text: "No invites yet.";
+                                color: Theme.text-faint;
+                                font-size: 13px;
+                                height: 44px;
+                                vertical-alignment: center;
+                            }
+
+                            for invite[index] in root.invites: ListRow {
+                                alternate: mod(index, 2) == 1;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 10px;
+                                    spacing: 12px;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        horizontal-stretch: 1;
+                                        Text {
+                                            text: invite.code;
+                                            color: invite.revoked ? Theme.text-faint : Theme.text;
+                                            font-family: Theme.font-mono;
+                                            font-size: 12.8px;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: invite.note != ""
+                                                ? invite.note + " \u{00b7} " + invite.uses
+                                                : invite.uses;
+                                            color: Theme.text-faint;
+                                            font-size: 11.5px;
+                                            overflow: elide;
+                                        }
+                                    }
+                                    Text {
+                                        text: invite.revoked ? "Revoked" : invite.expires;
+                                        color: invite.revoked ? Theme.danger : Theme.text-faint;
+                                        font-size: 11.5px;
+                                        vertical-alignment: center;
+                                    }
+                                    if !invite.revoked: Button {
+                                        label: "Copy link";
+                                        kind: ButtonKind.ghost;
+                                        height: 32px;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.copy-invite(invite.url); }
+                                    }
+                                    if !invite.revoked: Button {
+                                        label: "Revoke";
+                                        kind: ButtonKind.danger;
+                                        height: 32px;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.revoke-invite(invite.code); }
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- bans ------------------------------------------------
+                        if root.section == "bans": VerticalLayout {
+                            spacing: 0px;
+                            Text {
+                                text: "Bans";
+                                color: Theme.text;
+                                font-size: 22px;
+                                font-weight: 650;
+                            }
+                            Rectangle { height: 16px; }
+
+                            if root.bans.length == 0: Text {
+                                text: "Nobody is banned.";
+                                color: Theme.text-faint;
+                                font-size: 13px;
+                                height: 44px;
+                                vertical-alignment: center;
+                            }
+
+                            for entry[index] in root.bans: ListRow {
+                                alternate: mod(index, 2) == 1;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 10px;
+                                    spacing: 12px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        horizontal-stretch: 1;
+                                        Text {
+                                            text: entry.name;
+                                            color: Theme.text;
+                                            font-size: 13.4px;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: entry.reason != ""
+                                                ? entry.reason : "No reason given";
+                                            color: Theme.text-faint;
+                                            font-size: 11.5px;
+                                            overflow: elide;
+                                        }
+                                    }
+                                    Text {
+                                        text: entry.when;
+                                        color: Theme.text-faint;
+                                        font-size: 11.5px;
+                                        vertical-alignment: center;
+                                    }
+                                    Button {
+                                        label: "Unban";
+                                        kind: ButtonKind.subtle;
+                                        height: 32px;
+                                        y: (parent.height - self.height) / 2;
+                                        clicked => { root.unban(entry.user-id); }
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- audit -----------------------------------------------
+                        if root.section == "audit": VerticalLayout {
+                            spacing: 0px;
+                            Text {
+                                text: "Audit log";
+                                color: Theme.text;
+                                font-size: 22px;
+                                font-weight: 650;
+                            }
+                            Rectangle { height: 16px; }
+
+                            if root.audit.length == 0 && !root.loading: Text {
+                                text: "Nothing logged yet.";
+                                color: Theme.text-faint;
+                                font-size: 13px;
+                                height: 44px;
+                                vertical-alignment: center;
+                            }
+
+                            for entry[index] in root.audit: ListRow {
+                                alternate: mod(index, 2) == 1;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 12px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        horizontal-stretch: 1;
+                                        Text {
+                                            text: entry.actor + "  \u{00b7}  " + entry.action;
+                                            color: Theme.text;
+                                            font-size: 13px;
+                                            font-weight: 550;
+                                            overflow: elide;
+                                        }
+                                        if entry.detail != "": Text {
+                                            text: entry.detail;
+                                            color: Theme.text-faint;
+                                            font-size: 11.5px;
+                                            overflow: elide;
+                                        }
+                                    }
+                                    Text {
+                                        text: entry.when;
+                                        color: Theme.text-faint;
+                                        font-size: 11.5px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.loading: Text {
+                            text: "Loading\u{2026}";
+                            color: Theme.text-faint;
+                            font-size: 12.5px;
+                            height: 40px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

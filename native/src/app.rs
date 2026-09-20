@@ -85,6 +85,8 @@ enum Task {
     },
     LoadConversations,
     LoadRelationships,
+    LoadAdmin(&'static str),
+    AdminAction(AdminAction),
     StartCall {
         conversation: String,
     },
@@ -179,6 +181,12 @@ enum Event {
     AttachFailed(String),
     Reordered,
     CallFailed(String),
+    AdminStats(Box<Stats>),
+    AdminInstance(Box<Instance>),
+    AdminBans(Vec<BanEntry>),
+    AdminInvites(Vec<Invite>),
+    AdminAudit(Vec<AuditEntry>),
+    AdminDone(String),
     Relationships(Vec<Relationship>),
     Conversations(Vec<Conversation>),
     ConversationOpened(Box<Conversation>),
@@ -225,6 +233,18 @@ struct AppState {
     pending_attachments: Vec<Attachment>,
     /// Why the last attachment did not upload.
     attach_notice: String,
+    // --- administration ----------------------------------------------------
+    admin_section: String,
+    stats: Option<Stats>,
+    bans: Vec<BanEntry>,
+    invites: Vec<Invite>,
+    audit: Vec<AuditEntry>,
+    /// The instance as last fetched, which the form edits.
+    admin_form: Option<Instance>,
+    admin_saving: bool,
+    admin_notice: String,
+    /// The member whose roles are being edited.
+    admin_picked: Option<String>,
     /// Why the last call attempt failed.
     call_notice: String,
     /// When the current call was answered, for the duration readout.
@@ -294,6 +314,25 @@ const PINNED_WITHIN: f32 = 90.0;
 /// Far enough ahead that the page usually arrives before they reach the end.
 const PREFETCH_WITHIN: f32 = 400.0;
 
+/// Something an administrator asked for.
+#[derive(Clone, Debug)]
+enum AdminAction {
+    Kick(String),
+    Ban {
+        user: String,
+        reason: String,
+    },
+    Unban(String),
+    SetRole {
+        user: String,
+        role: String,
+        granted: bool,
+    },
+    CreateInvite,
+    RevokeInvite(String),
+    SaveInstance(serde_json::Value),
+}
+
 /// A change to how I relate to another member.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Relate {
@@ -309,6 +348,8 @@ enum Relate {
 enum Confirm {
     DeleteMessage(String),
     SignOut,
+    Kick(String),
+    Ban(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -338,6 +379,15 @@ impl AppState {
             window_focused: true,
             pending_attachments: Vec::new(),
             attach_notice: String::new(),
+            admin_section: "overview".into(),
+            stats: None,
+            bans: Vec::new(),
+            invites: Vec::new(),
+            audit: Vec::new(),
+            admin_form: None,
+            admin_saving: false,
+            admin_notice: String::new(),
+            admin_picked: None,
             call_notice: String::new(),
             call_started: None,
             inbox_tab: 0,
@@ -884,6 +934,111 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 });
             }
 
+            Task::LoadAdmin(section) => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    // Each section fetches only what it shows: an admin who
+                    // opens the overview should not pull the whole audit log.
+                    match section {
+                        "overview" => {
+                            if let Ok(stats) = client.stats().await {
+                                let _ = events.send(Event::AdminStats(Box::new(stats)));
+                            }
+                        }
+                        "instance" => {
+                            if let Ok(instance) = client.admin_instance().await {
+                                let _ = events.send(Event::AdminInstance(Box::new(instance)));
+                            }
+                        }
+                        "bans" => {
+                            let _ = events
+                                .send(Event::AdminBans(client.bans().await.unwrap_or_default()));
+                        }
+                        "invites" => {
+                            let _ = events.send(Event::AdminInvites(
+                                client.invites().await.unwrap_or_default(),
+                            ));
+                        }
+                        "audit" => {
+                            let _ = events.send(Event::AdminAudit(
+                                client.audit(None).await.unwrap_or_default(),
+                            ));
+                        }
+                        _ => {}
+                    }
+                });
+            }
+
+            Task::AdminAction(action) => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let (outcome, reload) = match action {
+                        AdminAction::Kick(user) => {
+                            (client.kick_member(&user).await.map(|_| ()), "")
+                        }
+                        AdminAction::Ban { user, reason } => {
+                            (client.ban_member(&user, &reason).await.map(|_| ()), "bans")
+                        }
+                        AdminAction::Unban(user) => {
+                            (client.unban_member(&user).await.map(|_| ()), "bans")
+                        }
+                        AdminAction::SetRole {
+                            user,
+                            role,
+                            granted,
+                        } => (
+                            client
+                                .set_member_role(&user, &role, granted)
+                                .await
+                                .map(|_| ()),
+                            "",
+                        ),
+                        AdminAction::CreateInvite => (
+                            // A week, ten uses: the defaults the web client
+                            // offers, so an invite made here behaves the same.
+                            client.create_invite("", 10, 24 * 7).await.map(|_| ()),
+                            "invites",
+                        ),
+                        AdminAction::RevokeInvite(code) => {
+                            (client.revoke_invite(&code).await.map(|_| ()), "invites")
+                        }
+                        AdminAction::SaveInstance(payload) => (
+                            client.update_instance(payload).await.map(|_| ()),
+                            "instance",
+                        ),
+                    };
+
+                    let _ = events.send(Event::AdminDone(match outcome {
+                        Ok(()) => String::new(),
+                        Err(error) => error.to_string(),
+                    }));
+
+                    // Whatever changed, the list it changed is refetched:
+                    // the server is the record, not the local guess.
+                    match reload {
+                        "bans" => {
+                            let _ = events
+                                .send(Event::AdminBans(client.bans().await.unwrap_or_default()));
+                        }
+                        "invites" => {
+                            let _ = events.send(Event::AdminInvites(
+                                client.invites().await.unwrap_or_default(),
+                            ));
+                        }
+                        "instance" => {
+                            if let Ok(instance) = client.admin_instance().await {
+                                let _ = events.send(Event::AdminInstance(Box::new(instance)));
+                            }
+                        }
+                        _ => {}
+                    }
+                });
+            }
+
             Task::LoadRelationships => {
                 let (Some(client), events) = (client.clone(), events.clone()) else {
                     continue;
@@ -1402,6 +1557,59 @@ fn handle_event(
 
         Event::CallFailed(error) => {
             state.borrow_mut().call_notice = error;
+            true
+        }
+
+        Event::AdminStats(stats) => {
+            state.borrow_mut().stats = Some(*stats);
+            true
+        }
+
+        Event::AdminInstance(instance) => {
+            let mut state_ref = state.borrow_mut();
+            // `/admin/instance` is the only place the public URL comes from,
+            // and the forward link needs it.
+            state_ref.store.public_url = instance.public_url.clone();
+            let (name, tagline, accent) = (
+                instance.name.clone(),
+                instance.tagline.clone(),
+                instance.accent_color.clone(),
+            );
+            state_ref.admin_form = Some(*instance);
+            state_ref.admin_saving = false;
+            drop(state_ref);
+
+            // The form is filled from the server's answer rather than left
+            // showing whatever was typed before the save.
+            app.set_form_name(name.into());
+            app.set_form_tagline(tagline.into());
+            app.set_form_accent(accent.into());
+            true
+        }
+
+        Event::AdminBans(list) => {
+            state.borrow_mut().bans = list;
+            true
+        }
+
+        Event::AdminInvites(list) => {
+            state.borrow_mut().invites = list;
+            true
+        }
+
+        Event::AdminAudit(list) => {
+            state.borrow_mut().audit = list;
+            true
+        }
+
+        Event::AdminDone(error) => {
+            let mut state_ref = state.borrow_mut();
+            state_ref.admin_saving = false;
+            state_ref.admin_notice = if error.is_empty() {
+                "Saved.".into()
+            } else {
+                error
+            };
             true
         }
 
@@ -2166,7 +2374,210 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
     );
     app.set_drag_offset(state_ref.drag_offset);
 
+    refresh_admin(app, &state_ref, accent);
+
     queue_images(&state_ref, tasks);
+}
+
+/// Everything the admin panel shows.
+///
+/// Split out because it is a screen of its own and rebuilding it with every
+/// message that arrives would be pure waste — it only runs while the panel
+/// is open.
+fn refresh_admin(app: &ui::App, state: &AppState, accent: Rgb) {
+    if app.get_screen() != ui::Screen::Admin {
+        return;
+    }
+    let store = &state.store;
+    let bits = store.permissions;
+    let me = &store.me.member;
+
+    app.set_admin_section(state.admin_section.clone().into());
+    app.set_admin_saving(state.admin_saving);
+    app.set_admin_notice(state.admin_notice.clone().into());
+
+    app.set_admin_sections(ModelRc::new(VecModel::from(
+        crate::admin::sections_for(bits)
+            .into_iter()
+            .map(|section| ui::AdminSection {
+                id: section.id.into(),
+                label: section.label.into(),
+            })
+            .collect::<Vec<_>>(),
+    )));
+
+    // --- overview ---------------------------------------------------------
+    let tile = |label: &str, value: String, detail: String| ui::StatTile {
+        label: label.into(),
+        value: value.into(),
+        detail: detail.into(),
+    };
+    let tiles = match state.stats.as_ref() {
+        Some(stats) => vec![
+            tile(
+                "MEMBERS",
+                stats.members.to_string(),
+                format!("{} online", stats.online),
+            ),
+            tile(
+                "MESSAGES",
+                stats.messages.to_string(),
+                format!("{} this week", stats.messages_last_week),
+            ),
+            tile("CHANNELS", stats.channels.to_string(), String::new()),
+            tile(
+                "STORAGE",
+                crate::format::bytes(stats.storage_bytes),
+                String::new(),
+            ),
+            tile(
+                "JOINED",
+                stats.joined_last_week.to_string(),
+                "in the last week".into(),
+            ),
+            tile(
+                "IN VOICE",
+                stats.in_voice.to_string(),
+                if stats.voice_enabled {
+                    String::new()
+                } else {
+                    "voice is off".into()
+                },
+            ),
+        ],
+        None => Vec::new(),
+    };
+    // Four across fits the narrowest pane the panel is usable at.
+    const TILES_PER_ROW: usize = 4;
+    app.set_admin_tiles(ModelRc::new(VecModel::from(
+        tiles
+            .chunks(TILES_PER_ROW)
+            .map(|chunk| ui::StatRow {
+                tiles: ModelRc::new(VecModel::from(chunk.to_vec())),
+            })
+            .collect::<Vec<_>>(),
+    )));
+
+    // --- members -----------------------------------------------------------
+    let members: Vec<ui::AdminMemberRow> = store
+        .members
+        .iter()
+        .map(|member| ui::AdminMemberRow {
+            id: member.id.clone().into(),
+            name: member.name().into(),
+            username: member.username.clone().into(),
+            avatar: member
+                .avatar_url
+                .as_deref()
+                .map(|url| state.images.get_or_blank(url))
+                .unwrap_or_default(),
+            avatar_fallback: crate::format::avatar_colour(&member.id, accent).to_slint(),
+            initials: crate::format::initials(member.name()).into(),
+            presence: format!("{:?}", member.presence).to_lowercase().into(),
+            roles: crate::admin::role_summary(member, &store.roles).into(),
+            joined: crate::format::short_date(&member.created_at).into(),
+            operator: member.is_operator,
+            can_kick: crate::admin::can_kick(me, member, &store.roles, bits),
+            can_ban: crate::admin::can_ban(me, member, &store.roles, bits),
+        })
+        .collect();
+    app.set_admin_members(ModelRc::new(VecModel::from(members)));
+
+    // --- roles, for whichever member is picked ------------------------------
+    let picked = state
+        .admin_picked
+        .as_deref()
+        .and_then(|id| store.member(id));
+    app.set_admin_has_picked(picked.is_some());
+    if let Some(member) = picked {
+        app.set_admin_picked(ui::AdminMemberRow {
+            id: member.id.clone().into(),
+            name: member.name().into(),
+            ..Default::default()
+        });
+    }
+
+    let roles: Vec<ui::RoleRow> = store
+        .roles
+        .iter()
+        .filter(|role| !role.is_default)
+        .map(|role| {
+            let colour = role.color.as_deref().and_then(Rgb::parse);
+            ui::RoleRow {
+                id: role.id.clone().into(),
+                name: role.name.clone().into(),
+                colour: colour.unwrap_or(state.palette.text).to_slint(),
+                coloured: colour.is_some(),
+                badge: role.badge.clone().into(),
+                members: store
+                    .members
+                    .iter()
+                    .filter(|m| m.roles.contains(&role.id))
+                    .count() as i32,
+                assignable: crate::admin::can_assign(me, role, &store.roles, bits),
+                granted: picked.is_some_and(|m| m.roles.contains(&role.id)),
+            }
+        })
+        .collect();
+    app.set_admin_roles(ModelRc::new(VecModel::from(roles)));
+
+    // --- invites, bans, audit -------------------------------------------------
+    app.set_admin_invites(ModelRc::new(VecModel::from(
+        state
+            .invites
+            .iter()
+            .map(|invite| ui::InviteRow {
+                code: invite.code.clone().into(),
+                url: invite.url.clone().into(),
+                note: invite.note.clone().into(),
+                uses: crate::admin::invite_uses(invite.uses, invite.max_uses).into(),
+                expires: invite
+                    .expires_at
+                    .as_deref()
+                    .map(|at| {
+                        SharedString::from(format!("expires {}", crate::format::relative(at)))
+                    })
+                    .unwrap_or_else(|| "never expires".into()),
+                revoked: invite.revoked,
+            })
+            .collect::<Vec<_>>(),
+    )));
+
+    app.set_admin_bans(ModelRc::new(VecModel::from(
+        state
+            .bans
+            .iter()
+            .map(|ban| ui::BanRow {
+                user_id: ban.user_id.clone().into(),
+                name: if ban.display_name.is_empty() {
+                    ban.username.clone()
+                } else {
+                    ban.display_name.clone()
+                }
+                .into(),
+                reason: ban.reason.clone().into(),
+                when: crate::format::relative(&ban.created_at).into(),
+            })
+            .collect::<Vec<_>>(),
+    )));
+
+    app.set_admin_audit(ModelRc::new(VecModel::from(
+        state
+            .audit
+            .iter()
+            .map(|entry| ui::AuditRow {
+                id: entry.id.clone().into(),
+                actor: entry
+                    .actor_name
+                    .clone()
+                    .unwrap_or_else(|| "The system".into())
+                    .into(),
+                action: entry.action.replace('_', " ").into(),
+                detail: entry.detail.clone().into(),
+                when: crate::format::relative(&entry.created_at).into(),
+            })
+            .collect::<Vec<_>>(),
+    )));
 }
 
 fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
@@ -2712,6 +3123,214 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             let Some(app) = weak.upgrade() else { return };
             state.borrow_mut().store.inbox_open = true;
             let _ = tasks.send(Task::LoadConversations);
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    // --- administration ----------------------------------------------------
+    app.on_open_admin({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            if !crate::perms::can_see_admin_panel(state_ref.store.permissions) {
+                return;
+            }
+            state_ref.admin_notice.clear();
+            let section = state_ref.admin_section.clone();
+            drop(state_ref);
+
+            app.set_screen(ui::Screen::Admin);
+            // Leak the section name for the task, which outlives this call.
+            for known in crate::admin::SECTIONS {
+                if known.id == section {
+                    let _ = tasks.send(Task::LoadAdmin(known.id));
+                }
+            }
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_close_admin({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            app.set_screen(ui::Screen::Chat);
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_choose_admin_section({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            state_ref.admin_section = id.to_string();
+            state_ref.admin_notice.clear();
+            drop(state_ref);
+
+            for known in crate::admin::SECTIONS {
+                if known.id == id.as_str() {
+                    let _ = tasks.send(Task::LoadAdmin(known.id));
+                }
+            }
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_pick_admin_member({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            state_ref.admin_picked = Some(id.to_string());
+            // Picking someone moves to the roles section, which is where
+            // the thing you picked them for actually is.
+            state_ref.admin_section = "roles".into();
+            drop(state_ref);
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_toggle_role({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |user, role, granted| {
+            let Some(app) = weak.upgrade() else { return };
+            // Applied locally so the button answers at once; the gateway's
+            // MEMBER_UPDATE is what the client ends up holding.
+            {
+                let mut state_ref = state.borrow_mut();
+                if let Some(member) = state_ref
+                    .store
+                    .members
+                    .iter_mut()
+                    .find(|m| m.id == user.as_str())
+                {
+                    member.roles.retain(|r| r != role.as_str());
+                    if granted {
+                        member.roles.push(role.to_string());
+                    }
+                }
+            }
+            let _ = tasks.send(Task::AdminAction(AdminAction::SetRole {
+                user: user.to_string(),
+                role: role.to_string(),
+                granted,
+            }));
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_kick_member({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let name = state
+                .borrow()
+                .store
+                .member(&id)
+                .map(|m| m.name().to_string())
+                .unwrap_or_default();
+            state.borrow_mut().pending_confirm = Some(Confirm::Kick(id.to_string()));
+            app.set_confirm_title("Kick member?".into());
+            app.set_confirm_body(
+                format!("{name} will be removed but can rejoin with an invite.").into(),
+            );
+            app.set_confirm_label("Kick".into());
+            app.set_overlay(ui::Overlay::Confirm);
+        }
+    });
+
+    app.on_ban_member({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let name = state
+                .borrow()
+                .store
+                .member(&id)
+                .map(|m| m.name().to_string())
+                .unwrap_or_default();
+            state.borrow_mut().pending_confirm = Some(Confirm::Ban(id.to_string()));
+            app.set_confirm_title("Ban member?".into());
+            app.set_confirm_body(
+                format!("{name} will be removed and cannot rejoin until unbanned.").into(),
+            );
+            app.set_confirm_label("Ban".into());
+            app.set_overlay(ui::Overlay::Confirm);
+        }
+    });
+
+    app.on_unban_member({
+        let tasks = tasks.clone();
+        move |id| {
+            let _ = tasks.send(Task::AdminAction(AdminAction::Unban(id.to_string())));
+        }
+    });
+
+    app.on_create_invite({
+        let tasks = tasks.clone();
+        move || {
+            let _ = tasks.send(Task::AdminAction(AdminAction::CreateInvite));
+        }
+    });
+
+    app.on_revoke_invite({
+        let tasks = tasks.clone();
+        move |code| {
+            let _ = tasks.send(Task::AdminAction(AdminAction::RevokeInvite(
+                code.to_string(),
+            )));
+        }
+    });
+
+    app.on_copy_invite({
+        move |url| {
+            copy_to_clipboard(&url);
+        }
+    });
+
+    app.on_save_instance({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let accent = app.get_form_accent().trim().to_string();
+            // A malformed accent would retint the whole app to nothing, so
+            // it is refused here rather than sent and applied.
+            if !accent.is_empty() && Rgb::parse(&accent).is_none() {
+                state.borrow_mut().admin_notice = "That accent is not a #rrggbb colour.".into();
+                refresh(&app, &state, &tasks);
+                return;
+            }
+
+            let mut payload = serde_json::json!({
+                "name": app.get_form_name().trim(),
+                "tagline": app.get_form_tagline().trim(),
+            });
+            if !accent.is_empty() {
+                payload["accent_color"] = serde_json::Value::String(accent);
+            }
+
+            let mut state_ref = state.borrow_mut();
+            state_ref.admin_saving = true;
+            state_ref.admin_notice.clear();
+            drop(state_ref);
+
+            let _ = tasks.send(Task::AdminAction(AdminAction::SaveInstance(payload)));
             refresh(&app, &state, &tasks);
         }
     });
@@ -3418,6 +4037,17 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             match pending {
                 Some(Confirm::DeleteMessage(id)) => {
                     let _ = tasks.send(Task::DeleteMessage(id));
+                }
+                Some(Confirm::Kick(user)) => {
+                    let _ = tasks.send(Task::AdminAction(AdminAction::Kick(user)));
+                }
+                Some(Confirm::Ban(user)) => {
+                    // No reason field yet; the server accepts an empty one
+                    // and the audit log records who did it either way.
+                    let _ = tasks.send(Task::AdminAction(AdminAction::Ban {
+                        user,
+                        reason: String::new(),
+                    }));
                 }
                 // The sign-out confirmation is the only one raised without a
                 // stored action, because the button that raises it is itself

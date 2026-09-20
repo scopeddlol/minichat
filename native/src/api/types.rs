@@ -426,6 +426,10 @@ pub struct Instance {
     pub setup_token_required: bool,
     #[serde(default)]
     pub version: String,
+    /// Only `/api/admin/instance` carries this, so it is empty until an
+    /// administrator has fetched that. The forward link uses it.
+    #[serde(default)]
+    pub public_url: String,
 }
 
 impl Default for Instance {
@@ -455,6 +459,7 @@ impl Default for Instance {
             voice_enabled: false,
             setup_token_required: false,
             version: String::new(),
+            public_url: String::new(),
         }
     }
 }
