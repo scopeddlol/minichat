@@ -180,7 +180,10 @@ git tag v0.1.0 && git push --tags
 ```
 
 `.github/workflows/desktop.yml` produces an `.msi` and an `.exe` and attaches
-them to the release. To build locally on Windows:
+them to the release. It also runs on any change under `desktop/`, where it
+installs what it just built, checks it, and uninstalls again — the bundle
+configuration is only exercised when an installer is actually made, and a
+release is a bad moment to discover it cannot be. To build locally on Windows:
 
 ```bash
 cd desktop
@@ -190,6 +193,27 @@ npm run build
 
 On first launch the app asks for your instance address and remembers it.
 Right-click the tray icon → **Switch instance…** changes it later.
+
+#### Deploying it to a community
+
+Everyone on one instance types the same address, so the `.exe` setup takes it
+on the command line and writes it where the app looks:
+
+```bat
+MiniChat_0.5.0_x64-setup.exe /S /INSTANCE=https://chat.example.com
+```
+
+`/S` is NSIS's silent flag; drop it to watch the installer run. The address is
+only written when there are no settings already — a reinstall never overrides
+what someone chose — and the app re-validates it on startup, so a bad value
+costs a trip to the connect screen and nothing more. The installer is per-user
+and needs no administrator.
+
+The installer's artwork lives in `desktop/icons/installer-*.bmp`, at the sizes
+NSIS and WiX demand, and is generated from the app icon by
+`desktop/icons/installer-art.py` so that the two cannot drift apart. What the
+installer *does* beyond copying files is `desktop/installer/hooks.nsh`, which
+is exactly the paragraph above and nothing else.
 
 If the connect screen says it can't reach the app's internals, the build was
 made without `withGlobalTauri` enabled in `desktop/tauri.conf.json` — the

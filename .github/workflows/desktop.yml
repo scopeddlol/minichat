@@ -3,11 +3,25 @@ name: Desktop app
 # Builds the Windows installers. Pushing a v* tag produces a DRAFT release with
 # the installers attached, so you can review and edit the notes before it goes
 # out. Run it manually to get the installers as workflow artifacts instead.
+#
+# It also runs on any change to the desktop app or its installer. The bundle
+# configuration — the NSIS hooks, the artwork, the WiX images — is only
+# exercised when an installer is actually built, and finding out that a
+# release cannot be packaged at the moment you tag it is finding out too late.
 
 on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
 jobs:
@@ -59,6 +73,55 @@ jobs:
             desktop/target/release/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 14
+
+      # The hooks only run when the installer runs, so this installs it,
+      # checks what the hook was supposed to write, and uninstalls again.
+      # Everything here happens on the runner's own user account, per-user
+      # and without elevation, which is how the installer is configured.
+      - name: Install, and check the installer's hooks
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe |
+              Select-Object -First 1
+          $instance = 'https://chat.example.com'
+          Write-Host "running $($setup.Name) /S /INSTANCE=$instance"
+          Start-Process -FilePath $setup.FullName `
+              -ArgumentList '/S', "/INSTANCE=$instance" -Wait
+
+          $settings = "$env:APPDATA\chat.mini.desktop\settings.json"
+          if (-not (Test-Path $settings)) {
+              throw "the installer did not write $settings"
+          }
+          $saved = (Get-Content $settings -Raw | ConvertFrom-Json).instance_url
+          if ($saved -ne $instance) {
+              throw "settings.json says '$saved', expected '$instance'"
+          }
+          Write-Host "instance address seeded: $saved"
+
+          $exe = "$env:LOCALAPPDATA\MiniChat\MiniChat.exe"
+          if (-not (Test-Path $exe)) { throw "MiniChat.exe is not at $exe" }
+
+      - name: Uninstall, and check it kept the settings
+        shell: pwsh
+        run: |
+          $uninstall = "$env:LOCALAPPDATA\MiniChat\uninstall.exe"
+          if (-not (Test-Path $uninstall)) { throw "no uninstaller at $uninstall" }
+          # The uninstaller copies itself out and returns, so -Wait is not
+          # enough to know it has finished.
+          Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait
+          $exe = "$env:LOCALAPPDATA\MiniChat\MiniChat.exe"
+          for ($i = 0; $i -lt 30 -and (Test-Path $exe); $i++) { Start-Sleep 1 }
+          if (Test-Path $exe) { throw "MiniChat.exe survived the uninstall" }
+
+          # Tauri's uninstaller only deletes the app's data when its
+          # checkbox is ticked, and an unattended uninstall never sees that
+          # page — so a member who reinstalls does not have to sign in again.
+          $settings = "$env:APPDATA\chat.mini.desktop\settings.json"
+          if (-not (Test-Path $settings)) {
+              throw "the silent uninstall deleted the saved settings"
+          }
+          Write-Host "settings kept, as an unattended uninstall should"
 
       - name: Publish a draft release
         if: startsWith(github.ref, 'refs/tags/v')
