@@ -32,7 +32,7 @@ the people you want and that's who's there.
 | **Admin panel** | Stats, branding, channels, roles, members, bans, invites, webhooks, live audit log |
 | **Profiles** | Avatar and banner you can drag and zoom to frame, bio, pronouns, favourite game, status, personal accent colour |
 | **Friends** | Friend requests, private favourites, and blocking |
-| **Apps** | Installable PWA (iOS, Android, desktop) and a native Windows build |
+| **Apps** | Installable PWA (iOS, Android, desktop) and native Windows and Linux builds |
 
 Built with **Rust** (axum + SQLite) on the server and **TypeScript** (React +
 Vite) on the client. One container, one database file, no external services.
@@ -59,8 +59,8 @@ requests certificates.
 
 ```bash
 mkdir minichat && cd minichat
-curl -O https://raw.githubusercontent.com/scopeddlol/minichat/v0.5.0/compose.yml
-curl -o .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.5.0/.env.example
+curl -O https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/compose.yml
+curl -o .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/.env.example
 ```
 
 Two files is all you need — the image is prebuilt, so there's nothing to
@@ -118,7 +118,7 @@ release instead, so upgrading is something you choose rather than something a
 restart does to you:
 
 ```bash
-MINICHAT_TAG=v0.5.0
+MINICHAT_TAG=v0.6.0
 ```
 
 ### Build from source instead
@@ -167,8 +167,23 @@ install beside it.
 It covers channels, messages, direct messages, voice, search, administration and
 the rest of the daily surface. Voice audio is behind a `voice` build feature,
 because it carries libwebrtc and wants clang 21 to link; everything else builds
-without a C++ toolchain. The Tauri installer below remains the released build
-until the native one has been through accessibility testing on Windows.
+without a C++ toolchain. The released binaries are built with that feature on,
+so they carry audio. Camera and screen share are not implemented here yet.
+
+From v0.6.0 the release carries this client for both Windows and Linux:
+
+```
+minichat-native-<version>-x86_64-windows.zip
+minichat-native-<version>-x86_64-linux.tar.gz
+```
+
+Unpack and run it — there is no installer and nothing to install beside it. On
+Linux the binary needs fontconfig and the xkbcommon and xcb libraries, which a
+desktop system already has.
+
+On **Windows this is a preview**, and the Tauri installer below remains the
+released build until the native one has been through accessibility testing
+there. On **Linux it is the only client**, because Tauri was never built for it.
 
 ### Windows desktop app
 
@@ -179,8 +194,9 @@ installers for you:
 git tag v0.1.0 && git push --tags
 ```
 
-`.github/workflows/desktop.yml` produces an `.msi` and an `.exe` and attaches
-them to the release. It also runs on any change under `desktop/`, where it
+`.github/workflows/desktop.yml` produces an `.msi` and an `.exe`, builds the
+native client above for Windows and Linux, and attaches all four to the
+release. It also runs on any change under `desktop/`, where it
 installs what it just built, checks it, and uninstalls again — the bundle
 configuration is only exercised when an installer is actually made, and a
 release is a bad moment to discover it cannot be. To build locally on Windows:
@@ -200,7 +216,7 @@ Everyone on one instance types the same address, so the `.exe` setup takes it
 on the command line and writes it where the app looks:
 
 ```bat
-MiniChat_0.5.0_x64-setup.exe /S /INSTANCE=https://chat.example.com
+MiniChat_0.6.0_x64-setup.exe /S /INSTANCE=https://chat.example.com
 ```
 
 `/S` is NSIS's silent flag; drop it to watch the installer run. Quotes around
@@ -415,13 +431,14 @@ registry.
 ### Publishing a release
 
 ```bash
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.6.0
+git push origin v0.6.0
 ```
 
-That publishes the image as `ghcr.io/scopeddlol/minichat:v0.5.0` (and `:0.5`)
-and opens a **draft** GitHub release with the Windows installers attached, for
-you to review before making it public.
+That publishes the image as `ghcr.io/scopeddlol/minichat:v0.6.0` (and `:0.6`)
+and opens a **draft** GitHub release with the Windows installers and the native
+client for Windows and Linux attached, for you to review before making it
+public.
 
 ### Making the image public
 

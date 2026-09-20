@@ -1,26 +1,33 @@
 name: Desktop app
 
-# Builds the Windows installers. Pushing a v* tag produces a DRAFT release with
-# the installers attached, so you can review and edit the notes before it goes
-# out. Run it manually to get the installers as workflow artifacts instead.
+# Builds every desktop artifact a release ships: the Tauri Windows installers,
+# and the Chromium-free native client for Windows and Linux. Pushing a v* tag
+# produces a DRAFT release with all of them attached, so you can review and
+# edit the notes before it goes out. Run it manually to get them as workflow
+# artifacts instead.
 #
-# It also runs on any change to the desktop app or its installer. The bundle
-# configuration — the NSIS hooks, the artwork, the WiX images — is only
-# exercised when an installer is actually built, and finding out that a
-# release cannot be packaged at the moment you tag it is finding out too late.
+# It also runs on any change to either client. The bundle configuration — the
+# NSIS hooks, the artwork, the WiX images — is only exercised when an installer
+# is actually built, and finding out that a release cannot be packaged at the
+# moment you tag it is finding out too late.
 
 on:
   push:
     tags:
       - 'v*'
     branches:
+      # The default branch was renamed; 'main' on its own stopped matching.
+      - 'scopeddlol/main'
       - main
-    paths:
-      - 'desktop/**'
-      - '.github/workflows/desktop.yml'
+    # Deliberately no `paths` here. A path filter applies to tag pushes too,
+    # and a tag whose commits happen not to touch desktop/ or native/ would
+    # skip this workflow and open a release with nothing attached — or no
+    # release at all. Pull requests below still get the filter, which is where
+    # the noise would otherwise be.
   pull_request:
     paths:
       - 'desktop/**'
+      - 'native/**'
       - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
@@ -29,7 +36,7 @@ jobs:
     name: Windows installer
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -218,8 +225,137 @@ jobs:
           }
           Write-Host "settings kept, as an unattended uninstall should"
 
+  # The Chromium-free client, for both platforms it runs on. Built with the
+  # `voice` feature: without it the binary joins voice channels and carries no
+  # audio, which is not a thing to hand someone as a chat client. That feature
+  # is what the clang 21 step below is for — see native/README.md.
+  native:
+    name: Native client (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: x86_64-linux
+          - os: windows-latest
+            label: x86_64-windows
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          key: release-voice
+
+      # The UI's libraries, plus ALSA and glib for libwebrtc's audio module.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libasound2-dev libglib2.0-dev
+
+      # libwebrtc ships a hermetic libc++ that needs clang 21 to link, and
+      # Ubuntu tops out at 18. Windows links against MSVC and needs none of it.
+      - name: Install clang 21
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSLO https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          echo "CC=/usr/bin/clang-21" >> "$GITHUB_ENV"
+          echo "CXX=/usr/bin/clang++-21" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=/usr/lib/llvm-21/lib" >> "$GITHUB_ENV"
+
+      - name: Build
+        working-directory: native
+        run: cargo build --release --locked --features voice
+
+      # A release binary that compiles and then draws nothing is the bug this
+      # client has actually had. The software renderer needs no display, so the
+      # check costs one frame.
+      - name: Check it still renders
+        if: runner.os == 'Linux'
+        working-directory: native
+        run: |
+          ./target/release/minichat-native --screenshot release-check.png 1180 820
+          size=$(stat -c%s release-check.png)
+          echo "release-check.png: $size bytes"
+          [ "$size" -gt 20000 ] || { echo "::error::the release build renders blank"; exit 1; }
+
+      # The fonts are compiled into the binary, so their licences travel with
+      # it rather than staying in the repository.
+      - name: Package
+        shell: bash
+        working-directory: native
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          stage="minichat-native-${version}-${{ matrix.label }}"
+          mkdir -p "$stage"
+          cp README.md "$stage/"
+          cp assets/fonts/*-LICENSE.txt "$stage/"
+
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/minichat-native.exe "$stage/"
+            7z a -tzip "${stage}.zip" "$stage" > /dev/null
+          else
+            cp target/release/minichat-native "$stage/"
+            tar czf "${stage}.tar.gz" "$stage"
+          fi
+
+          {
+            echo "### Native client — ${{ matrix.label }}"
+            echo '```'
+            ls -lh "${stage}".* | sed 's/  */ /g'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: minichat-native-${{ matrix.label }}
+          path: |
+            native/*.zip
+            native/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  # One release, assembled from whatever the build jobs produced. Separate so
+  # that a tag cannot open a half-empty release when one platform fails.
+  release:
+    name: Draft the release
+    runs-on: ubuntu-latest
+    needs: [windows, native]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List what is going to be attached
+        run: |
+          ls -lh dist
+          {
+            echo "### Release assets"
+            echo '```'
+            ls -1 dist
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish a draft release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
@@ -227,8 +363,10 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            desktop/target/release/bundle/msi/*.msi
-            desktop/target/release/bundle/nsis/*.exe
+            dist/*.msi
+            dist/*.exe
+            dist/*.zip
+            dist/*.tar.gz
           body: |
             ## Install
 
@@ -256,6 +394,23 @@ jobs:
             The installers are unsigned, so SmartScreen will warn on first run —
             choose **More info → Run anyway**, or sign them yourself with your
             own certificate.
+
+            ### Native client (no browser engine)
+
+            `minichat-native-*` is the Chromium-free client: one binary, around
+            30 MB idle where the installer above holds several hundred. Unpack
+            and run it — there is nothing to install beside it.
+
+            - **Linux** — `minichat-native-*-x86_64-linux.tar.gz`. This is the
+              only Linux client; the installer above is Windows-only. Needs
+              fontconfig and the xkbcommon and xcb libraries, which a desktop
+              system already has.
+            - **Windows** — `minichat-native-*-x86_64-windows.zip`, a
+              **preview**. The `.msi` remains the recommended Windows download
+              until this client has been through accessibility testing.
+
+            Voice audio works. **Camera and screen share do not** — use the
+            installer above or the web client for those.
 
             ### Mobile
 

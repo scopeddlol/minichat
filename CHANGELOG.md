@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0
+
+- A Chromium-free native client in `native/`, written in Rust with Slint and no browser engine. It covers channels, messages, direct messages, voice, search, administration, friends, forwarding, the image lightbox, notifications and global voice hotkeys. It holds about 30 MB idle where the WebView2 shell holds several hundred, and runs as a single binary with no runtime installed beside it. This replaces the WPF preview started in 0.5.0, which is gone: LiveKit has no C# client SDK, and the screen-capture code already existed in Rust.
+- **A Linux desktop client**, the first one. `minichat-native-0.6.0-x86_64-linux.tar.gz` is attached to the release. Unpack and run it; it needs fontconfig and the xkbcommon and xcb libraries, which a desktop system already has.
+- The native client also ships for Windows as `minichat-native-0.6.0-x86_64-windows.zip`. It is a **preview** there: the `.msi` remains the recommended Windows download until the native client has been through accessibility testing.
+- Released native binaries are built with the `voice` feature, so they carry audio rather than joining voice channels silently.
+- An admin panel, direct calls, voice media with real audio, and global voice hotkeys in the native client.
+- The Windows installers are branded, and are now built on every change rather than only at a tag, so a bundle that cannot be packaged is caught before a release depends on it. The installer's `/INSTANCE` switch is parsed without `GetOptions`.
+- Fixed the CI failures on the voice job and two clippy lints.
+
+### Deployment
+
+Camera and screen share are **not** implemented in the native client — use the Tauri installer or the web client for those. The native client's session token is a plain user-only file rather than the OS credential store. There is no tray icon on Linux, so the window will not hide itself where there is nothing to restore it from. The `.msi` and `.exe` installers are unchanged in behaviour from 0.5.0.
+
+Images: `ghcr.io/scopeddlol/minichat:v0.6.0` for Linux amd64 and arm64.
+
 ## 0.5.0
 
 - Fixed silent incoming voice: remote microphone and screen-share audio now attach to persistent playback elements, including while browsing text or DMs. Blocked autoplay has an explicit Enable call audio button; local microphones never play back.
