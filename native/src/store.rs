@@ -113,7 +113,8 @@ impl Store {
         self.categories.sort_by_key(|c| c.position);
         self.channels.sort_by_key(|c| c.position);
         // Highest role first, which is the order the hierarchy reads in.
-        self.roles.sort_by(|a, b| b.position.cmp(&a.position));
+        self.roles
+            .sort_by_key(|role| std::cmp::Reverse(role.position));
         self.members.sort_by_key(|m| m.name().to_lowercase());
     }
 

@@ -173,13 +173,16 @@ jobs:
         with:
           workspaces: native
           key: voice
+      # The last three are the media stack's, not the UI's: libwebrtc wants
+      # ALSA to reach a device and glib's headers to build, and PulseAudio is
+      # what the virtual devices below run on.
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev \
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            pulseaudio
+            libasound2-dev libglib2.0-dev pulseaudio
       - name: Install clang 21
         run: |
           curl -sSLO https://apt.llvm.org/llvm.sh

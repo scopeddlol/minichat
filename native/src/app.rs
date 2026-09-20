@@ -1375,12 +1375,11 @@ fn handle_event(
                         });
                         return true;
                     }
-                    None => {
-                        // The call ended, from either side.
-                        if state_ref.call_started.take().is_some() {
-                            state_ref.engine.disconnect();
-                            state_ref.voice.left();
-                        }
+                    // The call ended, from either side.
+                    None if state_ref.call_started.is_some() => {
+                        state_ref.call_started = None;
+                        state_ref.engine.disconnect();
+                        state_ref.voice.left();
                     }
                     _ => {}
                 }
