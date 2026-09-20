@@ -251,6 +251,7 @@ export component MessageItem {
     callback open-author(string);
     callback run-activated(string, int);
     callback open-attachment(string);
+    callback context-menu();
 
     property <length> reactions-h: root.message.reactions.length > 0 ? 32px : 0;
     property <length> attachments-h: root.message.attachments.length > 0
@@ -564,6 +565,12 @@ export component MessageItem {
 
         hover := TouchArea {
             mouse-cursor: MouseCursor.default;
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.right
+                    && event.kind == PointerEventKind.down) {
+                    root.context-menu();
+                }
+            }
         }
     }
     }

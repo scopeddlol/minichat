@@ -43,6 +43,9 @@ rustybuzz = "0.20"
 unicode-segmentation = "1"
 percent-encoding = "2"
 url = "2"
+# Slint 1.18 exposes no clipboard API, and "copy message text" is not a
+# feature worth dropping over it.
+arboard = { version = "3", default-features = false }
 
 [build-dependencies]
 slint-build = "1.18"

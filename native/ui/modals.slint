@@ -1,0 +1,445 @@
+// Dialogs and popovers.
+//
+// `[role=dialog]` in the web client: a scrim over the app, a bounded card,
+// escape to dismiss. Everything here is presentational — what a button does
+// is decided in Rust.
+
+import { Theme, Elevation } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+import { Button, ButtonKind, TextField, FieldLabel, Avatar, Divider, IconButton } from "controls.slint";
+import { MemberRow, MessageRow, ConversationRow } from "models.slint";
+
+// The dim behind a dialog. Clicking it dismisses, the way the web client's
+// backdrop does.
+export component Scrim inherits Rectangle {
+    callback dismissed();
+    width: 100%;
+    height: 100%;
+    background: #00000099;
+    TouchArea {
+        clicked => { root.dismissed(); }
+    }
+}
+
+// The shell every dialog shares: a titled card, centred, with a close button.
+export component Dialog {
+    in property <string> title;
+    in property <length> dialog-width: 520px;
+    in property <length> dialog-height: 420px;
+    callback dismissed();
+
+    Scrim {
+        dismissed => { root.dismissed(); }
+    }
+
+    card := Rectangle {
+        width: min(root.dialog-width, root.width - 32px);
+        height: min(root.dialog-height, root.height - 32px);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        background: Theme.surface-1;
+        border-radius: Theme.radius-card;
+        border-width: 1px;
+        border-color: Theme.border;
+
+        // Swallow clicks so they do not reach the scrim behind.
+        TouchArea {}
+
+        VerticalLayout {
+            Rectangle {
+                height: 56px;
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    Text {
+                        text: root.title;
+                        color: Theme.text;
+                        font-size: 15.5px;
+                        font-weight: 650;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: Icons.close;
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.dismissed(); }
+                    }
+                }
+            }
+            Divider {}
+            @children
+        }
+    }
+}
+
+component SettingRow {
+    in property <string> label;
+    in property <string> detail;
+    callback activated();
+    height: root.detail == "" ? 44px : 56px;
+
+    Rectangle {
+        background: touch.has-hover ? Theme.surface-2 : transparent;
+        border-radius: Theme.radius-control;
+        animate background { duration: Theme.normal; }
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: root.label;
+                    color: Theme.text;
+                    font-size: 13.8px;
+                    font-weight: 560;
+                }
+                if root.detail != "": Text {
+                    text: root.detail;
+                    color: Theme.text-faint;
+                    font-size: 11.8px;
+                    wrap: word-wrap;
+                }
+            }
+            @children
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.activated(); }
+    }
+}
+
+// A segmented control, for the theme choice.
+component Segmented {
+    in property <[string]> options;
+    in property <int> selected;
+    callback chose(int);
+
+    width: 210px;
+    height: 30px;
+
+    Rectangle {
+        background: Theme.surface-0;
+        border-radius: Theme.radius-control;
+        border-width: 1px;
+        border-color: Theme.border;
+
+        HorizontalLayout {
+            padding: 2px;
+            spacing: 2px;
+            for option[index] in root.options: Rectangle {
+                background: index == root.selected ? Theme.accent
+                    : seg.has-hover ? Theme.surface-2 : transparent;
+                border-radius: Theme.radius-small;
+                animate background { duration: Theme.normal; }
+                Text {
+                    text: option;
+                    color: index == root.selected ? Theme.accent-ink : Theme.text-muted;
+                    font-size: 12.2px;
+                    font-weight: 560;
+                }
+                seg := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.chose(index); }
+                }
+            }
+        }
+    }
+}
+
+export component SettingsDialog {
+    in property <string> instance-name;
+    in property <string> instance-version;
+    in property <string> my-name;
+    in property <string> my-username;
+    in property <image> my-avatar;
+    in property <color> my-avatar-fallback;
+    in property <string> my-initials;
+    in-out property <string> status-draft;
+    /// 0 dark, 1 light, 2 follow the instance.
+    in property <int> theme-choice;
+    in property <bool> members-open;
+
+    callback dismissed();
+    callback choose-theme(int);
+    callback save-status(string);
+    callback sign-out();
+    callback switch-instance();
+
+    Dialog {
+        width: root.width;
+        height: root.height;
+        title: "Settings";
+        dialog-width: 540px;
+        dialog-height: 520px;
+        dismissed => { root.dismissed(); }
+
+        Flickable {
+            content-height: body.preferred-height;
+            body := VerticalLayout {
+                padding: 16px;
+                spacing: 4px;
+
+                // --- who you are ------------------------------------------
+                Rectangle {
+                    height: 74px;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        spacing: 14px;
+                        Avatar {
+                            size: 52px;
+                            picture: root.my-avatar;
+                            fallback: root.my-avatar-fallback;
+                            initials: root.my-initials;
+                            name: root.my-name;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+                            Text {
+                                text: root.my-name;
+                                color: Theme.text;
+                                font-size: 17px;
+                                font-weight: 650;
+                            }
+                            Text {
+                                text: "@" + root.my-username;
+                                color: Theme.text-faint;
+                                font-size: 12.5px;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 8px; }
+                FieldLabel { text: "STATUS"; }
+                Rectangle { height: 6px; }
+                TextField {
+                    placeholder: "What are you up to?";
+                    text <=> root.status-draft;
+                    accepted(value) => { root.save-status(value); }
+                }
+
+                Rectangle { height: 20px; }
+                Divider {}
+                Rectangle { height: 12px; }
+
+                FieldLabel { text: "APPEARANCE"; }
+                Rectangle { height: 6px; }
+                SettingRow {
+                    label: "Theme";
+                    detail: "Instance follows what this community chose.";
+                    Segmented {
+                        options: ["Dark", "Light", "Instance"];
+                        selected: root.theme-choice;
+                        y: (parent.height - self.height) / 2;
+                        chose(index) => { root.choose-theme(index); }
+                    }
+                }
+
+                Rectangle { height: 20px; }
+                Divider {}
+                Rectangle { height: 12px; }
+
+                FieldLabel { text: "ACCOUNT"; }
+                Rectangle { height: 8px; }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Button {
+                        label: "Sign out";
+                        kind: ButtonKind.subtle;
+                        clicked => { root.sign-out(); }
+                    }
+                    Button {
+                        label: "Switch instance";
+                        kind: ButtonKind.ghost;
+                        clicked => { root.switch-instance(); }
+                    }
+                }
+
+                Rectangle { height: 22px; }
+                Text {
+                    text: root.instance-name + (root.instance-version != ""
+                        ? "  \u{00b7}  server " + root.instance-version : "");
+                    color: Theme.text-faint;
+                    font-size: 11.5px;
+                }
+                Text {
+                    text: "MiniChat native client \u{00b7} no browser engine";
+                    color: Theme.text-faint;
+                    font-size: 11.5px;
+                }
+            }
+        }
+    }
+}
+
+// A member's card, opened from their avatar or the member list.
+export component ProfileDialog {
+    in property <MemberRow> member;
+    in property <string> pronouns;
+    in property <string> bio;
+    in property <string> favourite-game;
+    in property <string> joined;
+    in property <image> banner;
+    in property <bool> is-me;
+    callback dismissed();
+    callback message();
+
+    Dialog {
+        width: root.width;
+        height: root.height;
+        title: "Profile";
+        dialog-width: 420px;
+        dialog-height: root.bio != "" ? 460px : 380px;
+        dismissed => { root.dismissed(); }
+
+        VerticalLayout {
+            // Banner, or a band of the member's own accent.
+            Rectangle {
+                height: 96px;
+                background: root.member.role-colour;
+                clip: true;
+                if root.banner.width > 0: Image {
+                    source: root.banner;
+                    width: 100%;
+                    height: 100%;
+                    image-fit: cover;
+                }
+            }
+
+            Rectangle {
+                height: 44px;
+                Avatar {
+                    x: 20px;
+                    y: -34px;
+                    size: 76px;
+                    picture: root.member.avatar;
+                    fallback: root.member.avatar-fallback;
+                    initials: root.member.initials;
+                    presence: root.member.presence;
+                    name: root.member.name;
+                }
+            }
+
+            VerticalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-bottom: 20px;
+                spacing: 3px;
+
+                Text {
+                    text: root.member.name;
+                    color: Theme.text;
+                    font-size: 19px;
+                    font-weight: 650;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text {
+                        text: "@" + root.member.id;
+                        color: Theme.text-faint;
+                        font-size: 12.5px;
+                    }
+                    if root.pronouns != "": Text {
+                        text: root.pronouns;
+                        color: Theme.text-faint;
+                        font-size: 12.5px;
+                    }
+                }
+
+                if root.member.status != "": Rectangle { height: 10px; }
+                if root.member.status != "": Text {
+                    text: root.member.status;
+                    color: Theme.text-muted;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+
+                if root.bio != "": Rectangle { height: 14px; }
+                if root.bio != "": FieldLabel { text: "ABOUT"; }
+                if root.bio != "": Text {
+                    text: root.bio;
+                    color: Theme.text-muted;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+
+                if root.favourite-game != "": Rectangle { height: 12px; }
+                if root.favourite-game != "": FieldLabel { text: "PLAYING"; }
+                if root.favourite-game != "": Text {
+                    text: root.favourite-game;
+                    color: Theme.text-muted;
+                    font-size: 13px;
+                }
+
+                if root.joined != "": Rectangle { height: 12px; }
+                if root.joined != "": Text {
+                    text: "Joined " + root.joined;
+                    color: Theme.text-faint;
+                    font-size: 11.8px;
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                if !root.is-me: Button {
+                    label: "Send a message";
+                    kind: ButtonKind.primary;
+                    icon: Icons.message-square;
+                    wide: true;
+                    clicked => { root.message(); }
+                }
+            }
+        }
+    }
+}
+
+// A confirmation, for anything that cannot be undone.
+export component ConfirmDialog {
+    in property <string> title;
+    in property <string> body;
+    in property <string> confirm-label: "Delete";
+    callback dismissed();
+    callback confirmed();
+
+    Dialog {
+        width: root.width;
+        height: root.height;
+        title: root.title;
+        dialog-width: 420px;
+        dialog-height: 210px;
+        dismissed => { root.dismissed(); }
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 0px;
+            Text {
+                text: root.body;
+                color: Theme.text-muted;
+                font-size: 13.5px;
+                wrap: word-wrap;
+            }
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                Button {
+                    label: "Cancel";
+                    kind: ButtonKind.ghost;
+                    clicked => { root.dismissed(); }
+                }
+                Button {
+                    label: root.confirm-label;
+                    kind: ButtonKind.danger;
+                    clicked => { root.confirmed(); }
+                }
+            }
+        }
+    }
+}

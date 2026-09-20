@@ -59,6 +59,13 @@ enum Task {
         pinned: bool,
     },
     FetchImages(Vec<String>),
+    Search {
+        query: String,
+    },
+    LoadPins {
+        channel: String,
+    },
+    UpdateStatus(String),
     Disconnect,
 }
 
@@ -95,6 +102,8 @@ enum Event {
         max_side: u32,
     },
     ImageFailed(String),
+    SearchResults(Vec<Message>),
+    Pins(Vec<Message>),
 }
 
 /// Everything the UI thread owns.
@@ -110,6 +119,33 @@ struct AppState {
     replying_to: Option<String>,
     /// Counter behind the optimistic-message IDs.
     next_temp: u64,
+
+    /// What a side panel is currently showing.
+    panel_hits: Vec<Message>,
+    panel_loading: bool,
+    /// The member whose card is open.
+    profile: Option<String>,
+    /// What the open confirmation will do if confirmed.
+    pending_confirm: Option<Confirm>,
+    /// The message a reaction is being picked for, if the picker was opened
+    /// from a message rather than the composer.
+    reacting_to: Option<String>,
+    /// What the open context menu is about.
+    menu_target: Option<MenuTarget>,
+}
+
+/// An action held behind a confirmation.
+#[derive(Clone, Debug, PartialEq)]
+enum Confirm {
+    DeleteMessage(String),
+    SignOut,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum MenuTarget {
+    Message(String),
+    Channel(String),
+    Member(String),
 }
 
 impl AppState {
@@ -124,6 +160,12 @@ impl AppState {
             connection: gateway::Status::Closed,
             replying_to: None,
             next_temp: 0,
+            panel_hits: Vec::new(),
+            panel_loading: false,
+            profile: None,
+            pending_confirm: None,
+            reacting_to: None,
+            menu_target: None,
         }
     }
 
@@ -430,6 +472,39 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 });
             }
 
+            Task::Search { query } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let hits = client.search(&query, None).await.unwrap_or_default();
+                    let _ = events.send(Event::SearchResults(hits));
+                });
+            }
+
+            Task::LoadPins { channel } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let pins = client.pins(&channel).await.unwrap_or_default();
+                    let _ = events.send(Event::Pins(pins));
+                });
+            }
+
+            Task::UpdateStatus(status) => {
+                let Some(client) = client.clone() else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    // The gateway echoes a MEMBER_UPDATE, so the store is
+                    // brought up to date by the same path as anyone else's.
+                    let _ = client
+                        .update_me(serde_json::json!({ "custom_status": status }))
+                        .await;
+                });
+            }
+
             Task::FetchImages(urls) => {
                 let (Some(client), events) = (client.clone(), events.clone()) else {
                     continue;
@@ -612,7 +687,31 @@ fn handle_event(
             state.borrow().images.fail(&url);
             false
         }
+
+        Event::SearchResults(hits) | Event::Pins(hits) => {
+            let mut state = state.borrow_mut();
+            state.panel_hits = hits;
+            state.panel_loading = false;
+            true
+        }
     }
+}
+
+/// The picker's grid width, in cells.
+///
+/// The picker is 328px wide with 12px padding and 36px cells, which leaves
+/// room for eight across.
+const EMOJI_COLUMNS: usize = 8;
+
+/// Chunk entries into rows. Slint has no wrapping layout, so the grid is
+/// built here — the same reason message bodies arrive as positioned runs.
+fn emoji_rows(entries: Vec<ui::EmojiEntry>) -> Vec<ui::EmojiRow> {
+    entries
+        .chunks(EMOJI_COLUMNS)
+        .map(|chunk| ui::EmojiRow {
+            entries: ModelRc::new(VecModel::from(chunk.to_vec())),
+        })
+        .collect()
 }
 
 /// Which images the current view wants that are not loaded yet.
@@ -798,7 +897,7 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
 
     // --- members ----------------------------------------------------------
     let default_name_colour = state_ref.palette.text;
-    let to_member = |member: &Member| {
+    let to_member = |member: &Member| -> ui::MemberRow {
         let voice = store.voice_states.iter().find(|s| s.user_id == member.id);
         let top_role = store
             .roles
@@ -881,6 +980,91 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
     app.set_member_groups(ModelRc::new(VecModel::from(groups)));
     app.set_member_count(store.members.len() as i32);
     app.set_members_open(state_ref.settings.members_open);
+
+    // --- side panel ------------------------------------------------------
+    let hits: Vec<ui::SearchHit> = state_ref
+        .panel_hits
+        .iter()
+        .map(|message| {
+            let author_id = message.author_id().unwrap_or_default().to_string();
+            ui::SearchHit {
+                id: message.id.clone().into(),
+                channel: store
+                    .channel(&message.channel_id)
+                    .map(|c| SharedString::from(c.name.as_str()))
+                    .unwrap_or_default(),
+                author: message.author_name().into(),
+                excerpt: view::excerpt(message, 140).into(),
+                timestamp: crate::format::relative(&message.created_at).into(),
+                avatar: message
+                    .author
+                    .as_ref()
+                    .and_then(|a| a.avatar_url.as_deref())
+                    .map(|url| state_ref.images.get_or_blank(url))
+                    .unwrap_or_default(),
+                avatar_fallback: crate::format::avatar_colour(&author_id, accent).to_slint(),
+                initials: crate::format::initials(message.author_name()).into(),
+            }
+        })
+        .collect();
+    app.set_panel_hits(ModelRc::new(VecModel::from(hits)));
+    app.set_panel_loading(state_ref.panel_loading);
+
+    // --- the open profile --------------------------------------------------
+    if let Some(member) = state_ref.profile.as_ref().and_then(|id| store.member(id)) {
+        app.set_profile_member(to_member(member));
+        app.set_profile_pronouns(member.pronouns.clone().into());
+        app.set_profile_bio(member.bio.clone().into());
+        app.set_profile_game(member.favorite_game.clone().into());
+        app.set_profile_joined(if member.created_at.is_empty() {
+            SharedString::new()
+        } else {
+            crate::format::full_date(&member.created_at).into()
+        });
+        app.set_profile_banner(
+            member
+                .banner_url
+                .as_deref()
+                .map(|url| state_ref.images.get_or_blank(url))
+                .unwrap_or_default(),
+        );
+        app.set_profile_is_me(member.id == store.me.member.id);
+    }
+
+    // --- the emoji picker ---------------------------------------------------
+    let filter = app.get_emoji_filter().to_string();
+    let unicode: Vec<ui::EmojiEntry> = crate::emoji::search(&filter)
+        .into_iter()
+        .map(|(glyph, name)| ui::EmojiEntry {
+            name: name.into(),
+            url: SharedString::new(),
+            picture: slint::Image::default(),
+            glyph: glyph.into(),
+        })
+        .collect();
+    let needle = filter.trim().to_lowercase();
+    let custom: Vec<ui::EmojiEntry> = store
+        .emojis
+        .iter()
+        .filter(|e| needle.is_empty() || e.name.contains(&needle))
+        .map(|e| ui::EmojiEntry {
+            name: e.name.clone().into(),
+            url: e.url.clone().into(),
+            picture: state_ref.images.get_or_blank(&e.url),
+            glyph: SharedString::new(),
+        })
+        .collect();
+    app.set_emoji_unicode(ModelRc::new(VecModel::from(emoji_rows(unicode))));
+    app.set_emoji_custom(ModelRc::new(VecModel::from(emoji_rows(custom))));
+
+    // --- settings ------------------------------------------------------------
+    app.set_my_username(store.me.member.username.clone().into());
+    app.set_instance_version(store.instance.version.clone().into());
+    app.set_theme_choice(match state_ref.settings.theme {
+        ThemeChoice::Dark => 0,
+        ThemeChoice::Light => 1,
+        ThemeChoice::Instance => 2,
+    });
 
     queue_images(&state_ref, tasks);
 }
@@ -1109,12 +1293,23 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
     });
 
     app.on_react({
+        let weak = app.as_weak();
         let state = state.clone();
         let tasks = tasks.clone();
         move |message, emoji| {
+            // An empty emoji means the message's react button was pressed:
+            // open the picker rather than toggling anything.
             if emoji.is_empty() {
-                // The picker is not built yet; an empty emoji means the
-                // button was pressed with nothing chosen.
+                let Some(app) = weak.upgrade() else { return };
+                let mut state_ref = state.borrow_mut();
+                state_ref.reacting_to = Some(message.to_string());
+                drop(state_ref);
+                let size = app.window().size().to_logical(app.window().scale_factor());
+                app.set_pointer_x(size.width / 2.0);
+                app.set_pointer_y(size.height / 2.0 + 180.0);
+                app.set_emoji_filter(SharedString::new());
+                refresh(&app, &state, &tasks);
+                app.set_overlay(ui::Overlay::Emoji);
                 return;
             }
             let state_ref = state.borrow();
@@ -1218,6 +1413,515 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
     app.on_quit(move || {
         let _ = slint::quit_event_loop();
     });
+
+    // --- overlays ------------------------------------------------------------
+    app.on_dismiss_overlay({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            state_ref.profile = None;
+            state_ref.pending_confirm = None;
+            state_ref.reacting_to = None;
+            state_ref.menu_target = None;
+            drop(state_ref);
+            app.set_overlay(ui::Overlay::None);
+            app.set_emoji_filter(SharedString::new());
+        }
+    });
+
+    app.on_open_settings({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            app.set_status_draft(state.borrow().store.me.member.custom_status.clone().into());
+            app.set_overlay(ui::Overlay::Settings);
+        }
+    });
+
+    app.on_choose_theme({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |index| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            state_ref.settings.theme = match index {
+                0 => ThemeChoice::Dark,
+                1 => ThemeChoice::Light,
+                _ => ThemeChoice::Instance,
+            };
+            let _ = state_ref.settings.store();
+            state_ref.palette = Palette::resolve(&state_ref.branding());
+            let palette = state_ref.palette.clone();
+            drop(state_ref);
+
+            theme::apply(&app, &palette);
+            // Author names and the fallback avatar colours are derived from
+            // the palette, so the whole view is rebuilt rather than retinted.
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_save_status({
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |text| {
+            let _ = tasks.send(Task::UpdateStatus(text.to_string()));
+            let _ = &state;
+        }
+    });
+
+    app.on_sign_out({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().pending_confirm = Some(Confirm::SignOut);
+            app.set_confirm_title("Sign out?".into());
+            app.set_confirm_body(
+                "You will need your username and password to sign back in.".into(),
+            );
+            app.set_confirm_label("Sign out".into());
+            app.set_overlay(ui::Overlay::Confirm);
+            let _ = &state;
+        }
+    });
+
+    app.on_confirm_action({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let pending = state.borrow_mut().pending_confirm.take();
+            app.set_overlay(ui::Overlay::None);
+
+            match pending {
+                Some(Confirm::DeleteMessage(id)) => {
+                    let _ = tasks.send(Task::DeleteMessage(id));
+                }
+                // The sign-out confirmation is the only one raised without a
+                // stored action, because the button that raises it is itself
+                // the action.
+                Some(Confirm::SignOut) | None => {
+                    let mut state_ref = state.borrow_mut();
+                    state_ref.settings.sign_out();
+                    let _ = state_ref.settings.store();
+                    drop(state_ref);
+                    let _ = tasks.send(Task::Disconnect);
+                    app.set_screen(ui::Screen::Signin);
+                    app.set_password(SharedString::new());
+                }
+            }
+        }
+    });
+
+    // Delete goes through a confirmation; nothing else does.
+    app.on_delete_message({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().pending_confirm = Some(Confirm::DeleteMessage(id.to_string()));
+            app.set_confirm_title("Delete message?".into());
+            app.set_confirm_body("This cannot be undone.".into());
+            app.set_confirm_label("Delete".into());
+            app.set_overlay(ui::Overlay::Confirm);
+        }
+    });
+
+    // --- profiles --------------------------------------------------------------
+    let open_profile = {
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id: SharedString| {
+            let Some(app) = weak.upgrade() else { return };
+            if id.is_empty() {
+                return;
+            }
+            state.borrow_mut().profile = Some(id.to_string());
+            refresh(&app, &state, &tasks);
+            app.set_overlay(ui::Overlay::Profile);
+        }
+    };
+    app.on_open_author(open_profile.clone());
+    app.on_open_member(open_profile);
+
+    // --- side panels ------------------------------------------------------------
+    app.on_open_search({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().panel_hits.clear();
+            app.set_panel_query(SharedString::new());
+            app.set_side_panel(ui::SidePanelKind::Search);
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_open_pins({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let channel = state_ref.store.selected_channel.clone();
+            state_ref.panel_hits.clear();
+            state_ref.panel_loading = true;
+            drop(state_ref);
+
+            app.set_side_panel(ui::SidePanelKind::Pins);
+            let _ = tasks.send(Task::LoadPins { channel });
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_close_panel({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().panel_hits.clear();
+            app.set_side_panel(ui::SidePanelKind::None);
+        }
+    });
+
+    app.on_run_search({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |query| {
+            let Some(app) = weak.upgrade() else { return };
+            let query = query.trim().to_string();
+            if query.is_empty() {
+                return;
+            }
+            state.borrow_mut().panel_loading = true;
+            refresh(&app, &state, &tasks);
+            let _ = tasks.send(Task::Search { query });
+        }
+    });
+
+    app.on_open_hit({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            // Jump to the hit's channel; the message itself is scrolled to
+            // once its page is loaded.
+            let channel = state
+                .borrow()
+                .panel_hits
+                .iter()
+                .find(|m| m.id == id.as_str())
+                .map(|m| m.channel_id.clone());
+            if let Some(channel) = channel {
+                let mut state_ref = state.borrow_mut();
+                if state_ref.store.selected_channel != channel {
+                    state_ref.store.selected_channel = channel.clone();
+                    drop(state_ref);
+                    let _ = tasks.send(Task::LoadMessages { channel });
+                } else {
+                    drop(state_ref);
+                }
+                refresh(&app, &state, &tasks);
+            }
+        }
+    });
+
+    // --- the emoji picker ----------------------------------------------------------
+    app.on_emoji({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().reacting_to = None;
+            // Anchored above the composer, which is where it was opened from.
+            let size = app.window().size().to_logical(app.window().scale_factor());
+            app.set_pointer_x(size.width / 2.0);
+            app.set_pointer_y(size.height - 90.0);
+            app.set_emoji_filter(SharedString::new());
+            refresh(&app, &state, &tasks);
+            app.set_overlay(ui::Overlay::Emoji);
+        }
+    });
+
+    // --- context menus --------------------------------------------------------
+    //
+    // The menu is built from what the member may actually do here, so it
+    // never offers an action the server would refuse.
+    fn menu_item(id: &str, label: &str, icon: &str, danger: bool, gap: bool) -> ui::MenuItem {
+        ui::MenuItem {
+            id: id.into(),
+            label: label.into(),
+            icon: icon.into(),
+            danger,
+            separator_before: gap,
+        }
+    }
+
+    app.on_channel_menu({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let state_ref = state.borrow();
+            let bits = state_ref.store.permissions;
+            let mut items = vec![menu_item("mark-read", "Mark as read", "", false, false)];
+            if crate::perms::can(bits, crate::perms::MANAGE_CHANNELS) {
+                items.push(menu_item("edit-channel", "Edit channel", "", false, true));
+                items.push(menu_item(
+                    "delete-channel",
+                    "Delete channel",
+                    "",
+                    true,
+                    false,
+                ));
+            }
+            drop(state_ref);
+
+            state.borrow_mut().menu_target = Some(MenuTarget::Channel(id.to_string()));
+            app.set_menu_items(ModelRc::new(VecModel::from(items)));
+            app.set_overlay(ui::Overlay::Menu);
+        }
+    });
+
+    app.on_message_menu({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let state_ref = state.borrow();
+            let channel = state_ref.store.selected_channel.clone();
+            let bits = state_ref.store.permissions_in(&channel);
+            let message = state_ref
+                .store
+                .messages_in(&channel)
+                .iter()
+                .find(|m| m.id == id.as_str())
+                .cloned();
+            let mine = message
+                .as_ref()
+                .and_then(|m| m.author_id().map(|a| a == state_ref.store.me.member.id))
+                .unwrap_or(false);
+            let pinned = message.as_ref().is_some_and(|m| m.pinned);
+            drop(state_ref);
+
+            let mut items = vec![
+                menu_item("react", "Add reaction", "", false, false),
+                menu_item("reply", "Reply", "", false, false),
+                menu_item("copy", "Copy text", "", false, false),
+            ];
+            if crate::perms::can(bits, crate::perms::PIN_MESSAGES) {
+                items.push(menu_item(
+                    "pin",
+                    if pinned {
+                        "Unpin message"
+                    } else {
+                        "Pin message"
+                    },
+                    "",
+                    false,
+                    true,
+                ));
+            }
+            // Anyone may edit their own; deleting also needs the permission
+            // when the message is someone else's.
+            if mine {
+                items.push(menu_item("edit", "Edit", "", false, true));
+            }
+            if mine || crate::perms::can(bits, crate::perms::MANAGE_MESSAGES) {
+                items.push(menu_item("delete", "Delete", "", true, !mine));
+            }
+
+            state.borrow_mut().menu_target = Some(MenuTarget::Message(id.to_string()));
+            app.set_menu_items(ModelRc::new(VecModel::from(items)));
+            app.set_overlay(ui::Overlay::Menu);
+        }
+    });
+
+    app.on_member_menu({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let state_ref = state.borrow();
+            let bits = state_ref.store.permissions;
+            let is_me = id.as_str() == state_ref.store.me.member.id;
+            drop(state_ref);
+
+            let mut items = vec![menu_item("profile", "View profile", "", false, false)];
+            if !is_me {
+                items.push(menu_item("dm", "Send a message", "", false, false));
+                // Moderation actions only appear to someone who has them.
+                if crate::perms::can(bits, crate::perms::KICK_MEMBERS) {
+                    items.push(menu_item("kick", "Kick from community", "", true, true));
+                }
+                if crate::perms::can(bits, crate::perms::BAN_MEMBERS) {
+                    items.push(menu_item("ban", "Ban", "", true, false));
+                }
+            }
+
+            state.borrow_mut().menu_target = Some(MenuTarget::Member(id.to_string()));
+            app.set_menu_items(ModelRc::new(VecModel::from(items)));
+            app.set_overlay(ui::Overlay::Menu);
+        }
+    });
+
+    app.on_menu_chose({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |choice| {
+            let Some(app) = weak.upgrade() else { return };
+            let target = state.borrow_mut().menu_target.take();
+            app.set_overlay(ui::Overlay::None);
+
+            match (choice.as_str(), target) {
+                ("mark-read", Some(MenuTarget::Channel(id))) => {
+                    let mut state_ref = state.borrow_mut();
+                    let last = state_ref
+                        .store
+                        .messages_in(&id)
+                        .last()
+                        .map(|m| m.id.clone());
+                    state_ref.store.mark_read(&id);
+                    drop(state_ref);
+                    if let Some(message) = last {
+                        let _ = tasks.send(Task::Ack {
+                            channel: id,
+                            message,
+                        });
+                    }
+                    refresh(&app, &state, &tasks);
+                }
+                ("profile", Some(MenuTarget::Member(id)))
+                | ("dm", Some(MenuTarget::Member(id))) => {
+                    state.borrow_mut().profile = Some(id);
+                    refresh(&app, &state, &tasks);
+                    app.set_overlay(ui::Overlay::Profile);
+                }
+                ("reply", Some(MenuTarget::Message(id))) => {
+                    state.borrow_mut().replying_to = Some(id);
+                    refresh(&app, &state, &tasks);
+                }
+                ("react", Some(MenuTarget::Message(id))) => {
+                    state.borrow_mut().reacting_to = Some(id);
+                    let size = app.window().size().to_logical(app.window().scale_factor());
+                    app.set_pointer_x(size.width / 2.0);
+                    app.set_pointer_y(size.height / 2.0 + 180.0);
+                    refresh(&app, &state, &tasks);
+                    app.set_overlay(ui::Overlay::Emoji);
+                }
+                ("copy", Some(MenuTarget::Message(id))) => {
+                    let state_ref = state.borrow();
+                    let channel = state_ref.store.selected_channel.clone();
+                    let text = state_ref
+                        .store
+                        .messages_in(&channel)
+                        .iter()
+                        .find(|m| m.id == id)
+                        .map(|m| m.content.clone());
+                    drop(state_ref);
+                    if let Some(text) = text {
+                        copy_to_clipboard(&text);
+                    }
+                }
+                ("pin", Some(MenuTarget::Message(id))) => {
+                    let state_ref = state.borrow();
+                    let channel = state_ref.store.selected_channel.clone();
+                    let pinned = state_ref
+                        .store
+                        .messages_in(&channel)
+                        .iter()
+                        .find(|m| m.id == id)
+                        .is_some_and(|m| m.pinned);
+                    drop(state_ref);
+                    let _ = tasks.send(Task::PinMessage {
+                        message: id,
+                        pinned: !pinned,
+                    });
+                }
+                ("delete", Some(MenuTarget::Message(id))) => {
+                    state.borrow_mut().pending_confirm = Some(Confirm::DeleteMessage(id));
+                    app.set_confirm_title("Delete message?".into());
+                    app.set_confirm_body("This cannot be undone.".into());
+                    app.set_confirm_label("Delete".into());
+                    app.set_overlay(ui::Overlay::Confirm);
+                }
+                // Editing in place, channel editing and moderation are
+                // surfaces this client does not carry yet. The entries only
+                // appear to someone who could use them, so saying so beats
+                // silently doing nothing.
+                ("edit", _)
+                | ("edit-channel", _)
+                | ("delete-channel", _)
+                | ("kick", _)
+                | ("ban", _) => {
+                    eprintln!("minichat: {choice} is not available in this client yet");
+                }
+                _ => {}
+            }
+        }
+    });
+
+    app.on_message_member({
+        move |_id| {
+            // The direct-message inbox is not built yet.
+            eprintln!("minichat: direct messages are not available in this client yet");
+        }
+    });
+
+    app.on_choose_emoji({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |choice| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let target = state_ref.reacting_to.take();
+            drop(state_ref);
+            app.set_overlay(ui::Overlay::None);
+            app.set_emoji_filter(SharedString::new());
+
+            match target {
+                // Opened from a message: it is a reaction.
+                Some(message) => {
+                    let _ = tasks.send(Task::React {
+                        message,
+                        emoji: choice.to_string(),
+                        on: true,
+                    });
+                }
+                // Opened from the composer: it is text.
+                None => {
+                    let draft = app.get_draft();
+                    app.set_draft(format!("{draft}{choice}").into());
+                }
+            }
+        }
+    });
+}
+
+/// Put text on the system clipboard.
+///
+/// A failure here is worth a line on stderr and nothing more: the member
+/// tried to copy a message and it did not arrive, which is annoying rather
+/// than a reason to interrupt them with a dialog.
+fn copy_to_clipboard(text: &str) {
+    match arboard::Clipboard::new().and_then(|mut board| board.set_text(text.to_owned())) {
+        Ok(()) => {}
+        Err(error) => eprintln!("minichat: could not copy to the clipboard: {error}"),
+    }
 }
 
 /// Hand a URL to the desktop.

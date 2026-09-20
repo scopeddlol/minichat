@@ -1,6 +1,7 @@
 mod api;
 mod app;
 mod demo;
+mod emoji;
 mod fonts;
 mod format;
 mod gateway;
@@ -54,6 +55,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..theme::Branding::default()
         };
         let palette = theme::Palette::resolve(&branding);
+        let overlay = args
+            .iter()
+            .position(|a| a == "--overlay")
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+            .unwrap_or_default();
         return screenshot::capture(path, width, height, move || {
             // After the headless platform is installed, never before:
             // registering a font initialises the backend, and the default one
@@ -62,6 +69,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let app = App::new()?;
             theme::apply(&app, &palette);
             demo::populate(&app, &palette);
+            // `--overlay settings|profile|emoji|menu|search` renders one of
+            // the dialogs over the demo, so they can be reviewed too.
+            demo::show_overlay(&app, &overlay);
             Ok(app)
         });
     }

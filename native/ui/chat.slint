@@ -39,6 +39,7 @@ export component ChatPane {
     callback open-attachment(string);
     callback scrolled(length);
     callback body-width-changed(length);
+    callback message-menu(string);
 
     VerticalLayout {
         // --- header ------------------------------------------------------
@@ -188,6 +189,7 @@ export component ChatPane {
                         open-author(id) => { root.open-author(id); }
                         run-activated(target, kind) => { root.run-activated(target, kind); }
                         open-attachment(id) => { root.open-attachment(id); }
+                        context-menu => { root.message-menu(message.id); }
                     }
                 }
             }

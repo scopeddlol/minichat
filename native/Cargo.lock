@@ -2647,6 +2647,7 @@ dependencies = [
 name = "minichat-native"
 version = "0.6.0"
 dependencies = [
+ "arboard",
  "directories",
  "futures-util",
  "image",

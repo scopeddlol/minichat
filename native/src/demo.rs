@@ -6,7 +6,7 @@
 //! block, a quote, a mention, a reply, a grouped run of messages, a member
 //! with a role colour and a badge.
 
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{Model, ModelRc, SharedString, VecModel};
 
 use crate::api::types::{Emoji, Member, Message, MessageAuthor, Presence};
 use crate::text::layout;
@@ -280,5 +280,105 @@ mod tests {
             Some(&demo.messages[0]),
             &demo.messages[1]
         ));
+    }
+}
+
+/// Open one of the dialogs over the demo, for reviewing it headlessly.
+pub fn show_overlay(app: &ui::App, which: &str) {
+    use slint::ComponentHandle;
+
+    match which {
+        "settings" => {
+            app.set_status_draft("building the native client".into());
+            app.set_my_username("ada".into());
+            app.set_instance_version("0.5.0".into());
+            app.set_theme_choice(0);
+            app.set_overlay(ui::Overlay::Settings);
+        }
+        "profile" => {
+            let members = app.get_member_groups();
+            if let Some(group) = members.row_data(0) {
+                if let Some(member) = group.members.row_data(1) {
+                    app.set_profile_member(member);
+                }
+            }
+            app.set_profile_pronouns("she/her".into());
+            app.set_profile_bio(
+                "Compiler person. Wrote the first one, more or less. Ask me about \
+                 COBOL, or about why a nanosecond is 30cm of wire."
+                    .into(),
+            );
+            app.set_profile_game("Zachtronics, mostly".into());
+            app.set_profile_joined("9 December 1906".into());
+            app.set_overlay(ui::Overlay::Profile);
+        }
+        "emoji" => {
+            let entries: Vec<ui::EmojiEntry> = crate::emoji::COMMON
+                .iter()
+                .map(|(glyph, name)| ui::EmojiEntry {
+                    name: (*name).into(),
+                    url: SharedString::new(),
+                    picture: slint::Image::default(),
+                    glyph: (*glyph).into(),
+                })
+                .collect();
+            let rows: Vec<ui::EmojiRow> = entries
+                .chunks(8)
+                .map(|chunk| ui::EmojiRow {
+                    entries: ModelRc::new(VecModel::from(chunk.to_vec())),
+                })
+                .collect();
+            app.set_emoji_unicode(ModelRc::new(VecModel::from(rows)));
+            app.set_pointer_x(620.0);
+            app.set_pointer_y(660.0);
+            app.set_overlay(ui::Overlay::Emoji);
+        }
+        "menu" => {
+            let item = |id: &str, label: &str, danger: bool, gap: bool| ui::MenuItem {
+                id: id.into(),
+                label: label.into(),
+                icon: SharedString::new(),
+                danger,
+                separator_before: gap,
+            };
+            app.set_menu_items(ModelRc::new(VecModel::from(vec![
+                item("react", "Add reaction", false, false),
+                item("reply", "Reply", false, false),
+                item("copy", "Copy text", false, false),
+                item("pin", "Pin message", false, true),
+                item("edit", "Edit", false, true),
+                item("delete", "Delete", true, false),
+            ])));
+            app.set_pointer_x(520.0);
+            app.set_pointer_y(300.0);
+            app.set_overlay(ui::Overlay::Menu);
+        }
+        "confirm" => {
+            app.set_confirm_title("Delete message?".into());
+            app.set_confirm_body("This cannot be undone.".into());
+            app.set_confirm_label("Delete".into());
+            app.set_overlay(ui::Overlay::Confirm);
+        }
+        "search" => {
+            app.set_side_panel(ui::SidePanelKind::Search);
+            app.set_panel_query("flow layout".into());
+            app.set_panel_hits(ModelRc::new(VecModel::from(vec![ui::SearchHit {
+                id: "m1".into(),
+                channel: "general".into(),
+                author: "Grace Hopper".into(),
+                excerpt: "Morning all. I've pushed the flow layout branch — message bodies \
+                          now wrap properly with inline formatting."
+                    .into(),
+                timestamp: "2h ago".into(),
+                avatar: slint::Image::default(),
+                avatar_fallback: crate::format::avatar_colour(
+                    "u2",
+                    crate::theme::Rgb::new(0x5b, 0x6e, 0xe8),
+                )
+                .to_slint(),
+                initials: "GH".into(),
+            }])));
+        }
+        _ => {}
     }
 }

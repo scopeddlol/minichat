@@ -12,14 +12,22 @@ import { ChatPane } from "chat.slint";
 import { MemberPanel } from "members.slint";
 import { Button, ButtonKind, TextField, FieldLabel, Avatar } from "controls.slint";
 import { Icon, Icons } from "icons.slint";
+import { SettingsDialog, ProfileDialog, ConfirmDialog } from "modals.slint";
+import { SidePanel, ContextMenu, EmojiPicker, SearchHit, EmojiEntry, EmojiRow, MenuItem } from "panels.slint";
 import {
     MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup, ConversationRow
 } from "models.slint";
 
 export {
     Theme, MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup,
-    ConversationRow
+    ConversationRow, SearchHit, EmojiEntry, EmojiRow, MenuItem
 }
+
+// Which panel is open beside the chat, if any.
+export enum SidePanelKind { none, search, pins }
+
+// Which dialog covers the app, if any.
+export enum Overlay { none, settings, profile, confirm, emoji, menu }
 
 // Which screen the window is showing.
 export enum Screen { connect, signin, chat }
@@ -262,8 +270,54 @@ export component App inherits Window {
     callback run-activated(string, int);
     callback open-attachment(string);
     callback body-width-changed(length);
+    callback message-menu(string);
     callback open-member(string);
     callback member-menu(string);
+
+    // --- overlays --------------------------------------------------------
+    in property <Overlay> overlay: Overlay.none;
+    in property <SidePanelKind> side-panel: SidePanelKind.none;
+
+    in-out property <string> status-draft;
+    in property <int> theme-choice;
+    in property <string> instance-version;
+    in property <string> my-username;
+
+    in property <MemberRow> profile-member;
+    in property <string> profile-pronouns;
+    in property <string> profile-bio;
+    in property <string> profile-game;
+    in property <string> profile-joined;
+    in property <image> profile-banner;
+    in property <bool> profile-is-me;
+
+    in property <string> confirm-title;
+    in property <string> confirm-body;
+    in property <string> confirm-label: "Delete";
+
+    in property <[SearchHit]> panel-hits;
+    in-out property <string> panel-query;
+    in property <bool> panel-loading;
+
+    in property <[EmojiRow]> emoji-custom;
+    in property <[EmojiRow]> emoji-unicode;
+    in-out property <string> emoji-filter;
+
+    in property <[MenuItem]> menu-items;
+    in property <length> pointer-x;
+    in property <length> pointer-y;
+
+    callback dismiss-overlay();
+    callback choose-theme(int);
+    callback save-status(string);
+    callback sign-out();
+    callback confirm-action();
+    callback close-panel();
+    callback run-search(string);
+    callback open-hit(string);
+    callback choose-emoji(string);
+    callback menu-chose(string);
+    callback message-member(string);
 
     callback minimise();
     callback toggle-maximise();
@@ -367,14 +421,114 @@ export component App inherits Window {
                 run-activated(target, kind) => { root.run-activated(target, kind); }
                 open-attachment(id) => { root.open-attachment(id); }
                 body-width-changed(w) => { root.body-width-changed(w); }
+                message-menu(id) => { root.message-menu(id); }
             }
 
-            if root.members-open: MemberPanel {
+            if root.side-panel != SidePanelKind.none: SidePanel {
+                title: root.side-panel == SidePanelKind.search ? "Search" : "Pinned messages";
+                icon: root.side-panel == SidePanelKind.search ? Icons.search : Icons.pin;
+                searchable: root.side-panel == SidePanelKind.search;
+                query <=> root.panel-query;
+                hits: root.panel-hits;
+                loading: root.panel-loading;
+                empty-text: root.side-panel == SidePanelKind.search
+                    ? "Type to search this community."
+                    : "No messages are pinned in this channel yet.";
+                dismissed => { root.close-panel(); }
+                search(q) => { root.run-search(q); }
+                open-hit(id) => { root.open-hit(id); }
+            }
+
+            if root.members-open && root.side-panel == SidePanelKind.none: MemberPanel {
                 groups: root.member-groups;
                 total: root.member-count;
                 open-member(id) => { root.open-member(id); }
                 member-menu(id) => { root.member-menu(id); }
             }
+        }
+    }
+
+    // --- overlays, above everything ------------------------------------
+    if root.overlay == Overlay.settings: SettingsDialog {
+        width: root.width;
+        height: root.height;
+        instance-name: root.instance-name;
+        instance-version: root.instance-version;
+        my-name: root.my-name;
+        my-username: root.my-username;
+        my-avatar: root.my-avatar;
+        my-avatar-fallback: root.my-avatar-fallback;
+        my-initials: root.my-initials;
+        status-draft <=> root.status-draft;
+        theme-choice: root.theme-choice;
+        members-open: root.members-open;
+        dismissed => { root.dismiss-overlay(); }
+        choose-theme(index) => { root.choose-theme(index); }
+        save-status(text) => { root.save-status(text); }
+        sign-out => { root.sign-out(); }
+        switch-instance => { root.forget-instance(); }
+    }
+
+    if root.overlay == Overlay.profile: ProfileDialog {
+        width: root.width;
+        height: root.height;
+        member: root.profile-member;
+        pronouns: root.profile-pronouns;
+        bio: root.profile-bio;
+        favourite-game: root.profile-game;
+        joined: root.profile-joined;
+        banner: root.profile-banner;
+        is-me: root.profile-is-me;
+        dismissed => { root.dismiss-overlay(); }
+        message => { root.message-member(root.profile-member.id); }
+    }
+
+    if root.overlay == Overlay.confirm: ConfirmDialog {
+        width: root.width;
+        height: root.height;
+        title: root.confirm-title;
+        body: root.confirm-body;
+        confirm-label: root.confirm-label;
+        dismissed => { root.dismiss-overlay(); }
+        confirmed => { root.confirm-action(); }
+    }
+
+    if root.overlay == Overlay.emoji: EmojiPicker {
+        width: root.width;
+        height: root.height;
+        custom: root.emoji-custom;
+        unicode: root.emoji-unicode;
+        filter <=> root.emoji-filter;
+        anchor-x: root.pointer-x;
+        anchor-y: root.pointer-y;
+        chose(name) => { root.choose-emoji(name); }
+        dismissed => { root.dismiss-overlay(); }
+    }
+
+    if root.overlay == Overlay.menu: ContextMenu {
+        width: root.width;
+        height: root.height;
+        items: root.menu-items;
+        anchor-x: root.pointer-x;
+        anchor-y: root.pointer-y;
+        chose(id) => { root.menu-chose(id); }
+        dismissed => { root.dismiss-overlay(); }
+    }
+
+    // Escape closes whatever is open, innermost first.
+    FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                if (root.overlay != Overlay.none) {
+                    root.dismiss-overlay();
+                    return accept;
+                }
+                if (root.side-panel != SidePanelKind.none) {
+                    root.close-panel();
+                    return accept;
+                }
+            }
+            return reject;
         }
     }
 }
