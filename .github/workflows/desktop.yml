@@ -389,9 +389,11 @@ jobs:
             ### Self-host the server
 
             ```bash
-            curl -O https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/compose.yml
-            curl -o .env https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/.env.example
-            # fill in .env, then:
+            curl -fLO https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/compose.yml
+            curl -fLO https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/Caddyfile
+            curl -fLO https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/livekit.yaml
+            curl -fLo .env https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/.env.example
+            # fill in .env and set MINICHAT_TAG=${{ github.ref_name }}, then:
             docker compose up -d
             ```
 

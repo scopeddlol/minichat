@@ -59,12 +59,15 @@ requests certificates.
 
 ```bash
 mkdir minichat && cd minichat
-curl -O https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/compose.yml
-curl -o .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/.env.example
+curl -fLO https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/compose.yml
+curl -fLO https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/Caddyfile
+curl -fLO https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/livekit.yaml
+curl -fLo .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/.env.example
 ```
 
-Two files is all you need — the image is prebuilt, so there's nothing to
-compile and no repository to clone.
+These four files configure the stack; the application image is prebuilt,
+so there is nothing to compile and no repository to clone. Set
+`MINICHAT_TAG=v0.6.0` in `.env` to pin this release.
 
 Open `.env` and set your two domains, then generate the secrets:
 
