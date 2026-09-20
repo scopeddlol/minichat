@@ -6,6 +6,7 @@
 import { Theme } from "theme.slint";
 import { Icon, Icons } from "icons.slint";
 import { IconButton } from "controls.slint";
+import { PendingAttachment } from "models.slint";
 
 export component Composer {
     in property <string> placeholder: "Message";
@@ -15,14 +16,18 @@ export component Composer {
     in property <string> notice;
     in property <string> replying-to;
     in property <bool> can-attach: true;
+    in property <[PendingAttachment]> attachments;
 
     callback send(string);
     callback cancel-reply();
     callback attach();
     callback emoji();
     callback typing();
+    callback remove-attachment(string);
 
-    height: 16px + (root.replying-to != "" ? 34px : 0px)
+    property <length> attachments-h: root.attachments.length > 0 ? 82px : 0px;
+
+    height: 16px + root.attachments-h + (root.replying-to != "" ? 34px : 0px)
         + max(46px, min(180px, input.preferred-height + 26px))
         + (root.notice != "" ? 20px : 0px) + 20px;
 
@@ -68,12 +73,82 @@ export component Composer {
             }
         }
 
+        // What is attached, above the box and sharing its surface.
+        if root.attachments.length > 0: Rectangle {
+            height: root.attachments-h;
+            background: Theme.surface-1;
+            border-top-left-radius: root.replying-to != "" ? 0 : Theme.radius-control;
+            border-top-right-radius: root.replying-to != "" ? 0 : Theme.radius-control;
+
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 8px;
+                alignment: start;
+
+                for file in root.attachments: Rectangle {
+                    width: 62px;
+                    height: 62px;
+                    background: Theme.surface-0;
+                    border-radius: Theme.radius-control;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    clip: true;
+
+                    if file.picture.width > 0: Image {
+                        source: file.picture;
+                        width: 100%;
+                        height: 100%;
+                        image-fit: cover;
+                    }
+                    if file.picture.width == 0: VerticalLayout {
+                        alignment: center;
+                        spacing: 3px;
+                        Icon {
+                            data: file.kind == "video" ? Icons.video
+                                : file.kind == "audio" ? Icons.volume
+                                : Icons.download;
+                            size: 17px;
+                            colour: Theme.text-muted;
+                            x: (parent.width - self.width) / 2;
+                        }
+                        Text {
+                            text: file.size;
+                            color: Theme.text-faint;
+                            font-size: 9.5px;
+                            horizontal-alignment: center;
+                        }
+                    }
+
+                    // The remove button, top right, over the preview.
+                    Rectangle {
+                        x: parent.width - 20px;
+                        y: 2px;
+                        width: 18px;
+                        height: 18px;
+                        border-radius: 9px;
+                        background: #000000b3;
+                        Icon {
+                            data: Icons.close;
+                            size: 11px;
+                            colour: white;
+                        }
+                        TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.remove-attachment(file.id); }
+                        }
+                    }
+                }
+            }
+        }
+
         Rectangle {
             height: max(46px, min(180px, input.preferred-height + 26px));
             background: Theme.surface-1;
             border-radius: Theme.radius-control;
-            border-top-left-radius: root.replying-to != "" ? 0 : Theme.radius-control;
-            border-top-right-radius: root.replying-to != "" ? 0 : Theme.radius-control;
+            border-top-left-radius: root.replying-to != "" || root.attachments.length > 0
+                ? 0 : Theme.radius-control;
+            border-top-right-radius: root.replying-to != "" || root.attachments.length > 0
+                ? 0 : Theme.radius-control;
             border-width: 1px;
             border-color: input.has-focus ? Theme.accent : Theme.border;
             animate border-color { duration: Theme.normal; }
@@ -136,8 +211,11 @@ export component Composer {
                 IconButton {
                     icon: Icons.send;
                     tooltip: "Send";
-                    enabled: root.enabled && root.draft != "";
-                    colour: root.draft != "" ? Theme.accent : Theme.text-faint;
+                    // Attachments alone are a message too.
+                    enabled: root.enabled
+                        && (root.draft != "" || root.attachments.length > 0);
+                    colour: root.draft != "" || root.attachments.length > 0
+                        ? Theme.accent : Theme.text-faint;
                     active-colour: Theme.accent;
                     y: (parent.height - self.height) / 2;
                     clicked => { root.send(root.draft); }

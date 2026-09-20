@@ -403,6 +403,32 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             app.set_direct_messages(app.get_messages());
             app.set_loading_direct(false);
         }
+        "attaching" => {
+            let file = |id: &str, name: &str, size: &str, kind: &str| ui::PendingAttachment {
+                id: id.into(),
+                filename: name.into(),
+                size: size.into(),
+                kind: kind.into(),
+                picture: slint::Image::default(),
+            };
+            app.set_pending_attachments(ModelRc::new(VecModel::from(vec![
+                file("a1", "flow-layout.png", "184 KB", "image"),
+                file("a2", "profile.json", "2.1 KB", "file"),
+            ])));
+            app.set_draft("Here's what it looks like now".into());
+        }
+        "editing" => {
+            // The third message, opened for editing with its source text.
+            let rows = app.get_messages();
+            if let Some(row) = rows.row_data(2) {
+                app.set_editing_id(row.id.clone());
+                app.set_edit_draft(
+                    "Nice. Does it handle `inline code` and links like \
+                     https://example.com/a-fairly-long-url-that-gets-elided-eventually ?"
+                        .into(),
+                );
+            }
+        }
         "search" => {
             app.set_side_panel(ui::SidePanelKind::Search);
             app.set_panel_query("flow layout".into());

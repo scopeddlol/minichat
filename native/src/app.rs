@@ -43,6 +43,7 @@ enum Task {
         temp_id: String,
         content: String,
         reply_to: Option<String>,
+        attachments: Vec<Attachment>,
     },
     React {
         message: String,
@@ -57,6 +58,16 @@ enum Task {
     PinMessage {
         message: String,
         pinned: bool,
+    },
+    EditMessage {
+        message: String,
+        content: String,
+    },
+    /// Pick files and upload them. The picker runs on the runtime thread so
+    /// the UI is not blocked while it is open.
+    Attach {
+        channel: String,
+        max_mb: i64,
     },
     FetchImages(Vec<String>),
     Search {
@@ -140,6 +151,11 @@ enum Event {
         channel: String,
         error: String,
     },
+    Attached {
+        channel: String,
+        files: Vec<Attachment>,
+    },
+    AttachFailed(String),
     Conversations(Vec<Conversation>),
     ConversationOpened(Box<Conversation>),
     DirectHistory {
@@ -178,6 +194,12 @@ struct AppState {
     profile: Option<String>,
     /// What the open confirmation will do if confirmed.
     pending_confirm: Option<Confirm>,
+    /// Files uploaded and waiting to go with the next message.
+    pending_attachments: Vec<Attachment>,
+    /// Why the last attachment did not upload.
+    attach_notice: String,
+    /// The message being edited in place, and the text so far.
+    editing: Option<String>,
     /// The message a reaction is being picked for, if the picker was opened
     /// from a message rather than the composer.
     reacting_to: Option<String>,
@@ -252,6 +274,9 @@ impl AppState {
             panel_loading: false,
             profile: None,
             pending_confirm: None,
+            pending_attachments: Vec::new(),
+            attach_notice: String::new(),
+            editing: None,
             reacting_to: None,
             menu_target: None,
             scroll_distance: 0.0,
@@ -548,13 +573,14 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 temp_id,
                 content,
                 reply_to,
+                attachments,
             } => {
                 let (Some(client), events) = (client.clone(), events.clone()) else {
                     continue;
                 };
                 tokio::spawn(async move {
                     let _ = match client
-                        .send_message(&channel, &content, reply_to.as_deref())
+                        .send_message_with(&channel, &content, reply_to.as_deref(), &attachments)
                         .await
                     {
                         Ok(saved) => events.send(Event::Sent {
@@ -593,6 +619,50 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 };
                 tokio::spawn(async move {
                     let _ = client.delete_message(&id).await;
+                });
+            }
+
+            Task::EditMessage { message, content } => {
+                let Some(client) = client.clone() else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    // The gateway echoes MESSAGE_UPDATE, so the edit lands in
+                    // the store by the same path as anyone else's.
+                    let _ = client.edit_message(&message, &content).await;
+                });
+            }
+
+            Task::Attach { channel, max_mb } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let Some(paths) = rfd::AsyncFileDialog::new()
+                        .set_title("Attach files")
+                        .pick_files()
+                        .await
+                    else {
+                        // Cancelled. Not an error, and not worth a notice.
+                        return;
+                    };
+
+                    let mut uploaded = Vec::new();
+                    for handle in paths {
+                        match client.upload(handle.path(), max_mb).await {
+                            Ok(file) => uploaded.push(file),
+                            Err(error) => {
+                                // One bad file does not throw away the rest.
+                                let _ = events.send(Event::AttachFailed(error.to_string()));
+                            }
+                        }
+                    }
+                    if !uploaded.is_empty() {
+                        let _ = events.send(Event::Attached {
+                            channel,
+                            files: uploaded,
+                        });
+                    }
                 });
             }
 
@@ -995,6 +1065,33 @@ fn handle_event(
             state_ref.voice.status = crate::voice::Status::Failed;
             state_ref.voice.channel = channel;
             state_ref.voice.notice = error;
+            true
+        }
+
+        Event::Attached { channel, files } => {
+            let mut state_ref = state.borrow_mut();
+            if state_ref.store.selected_channel != channel {
+                return false;
+            }
+            let previews: Vec<String> = files
+                .iter()
+                .filter(|f| f.is_image())
+                .map(|f| f.url.clone())
+                .filter(|url| state_ref.images.claim(url))
+                .collect();
+            state_ref.pending_attachments.extend(files);
+            state_ref.attach_notice.clear();
+            drop(state_ref);
+
+            if !previews.is_empty() {
+                let _ = tasks.send(Task::FetchImages(previews));
+            }
+            true
+        }
+
+        Event::AttachFailed(error) => {
+            let mut state_ref = state.borrow_mut();
+            state_ref.attach_notice = error;
             true
         }
 
@@ -1569,6 +1666,42 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
     app.set_voice_screen_sharing(voice.screen_sharing);
     app.set_voice_notice(voice.notice.clone().into());
 
+    // --- pending attachments ----------------------------------------------
+    let pending: Vec<ui::PendingAttachment> = state_ref
+        .pending_attachments
+        .iter()
+        .map(|file| ui::PendingAttachment {
+            id: file.id.clone().into(),
+            filename: file.filename.clone().into(),
+            size: crate::format::bytes(file.size).into(),
+            kind: if file.is_image() {
+                "image"
+            } else if file.is_video() {
+                "video"
+            } else if file.is_audio() {
+                "audio"
+            } else {
+                "file"
+            }
+            .into(),
+            picture: state_ref.images.get_or_blank(&file.url),
+        })
+        .collect();
+    app.set_pending_attachments(ModelRc::new(VecModel::from(pending)));
+
+    // The composer's notice doubles as where an upload failure is said.
+    if !state_ref.attach_notice.is_empty() {
+        app.set_compose_notice(state_ref.attach_notice.clone().into());
+    }
+
+    app.set_editing_id(
+        state_ref
+            .editing
+            .as_deref()
+            .map(SharedString::from)
+            .unwrap_or_default(),
+    );
+
     app.set_scroll_to_newest(state_ref.scroll_token);
 
     queue_images(&state_ref, tasks);
@@ -1751,13 +1884,16 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
         move |text| {
             let Some(app) = weak.upgrade() else { return };
             let content = text.trim().to_string();
-            if content.is_empty() {
-                return;
-            }
 
             let mut state_ref = state.borrow_mut();
             let channel = state_ref.store.selected_channel.clone();
             if channel.is_empty() || !state_ref.store.can_send_in(&channel) {
+                return;
+            }
+            let attachments = std::mem::take(&mut state_ref.pending_attachments);
+            // A message with nothing in it and nothing attached is not a
+            // message; one with only attachments is.
+            if content.is_empty() && attachments.is_empty() {
                 return;
             }
             let temp_id = state_ref.temp_id();
@@ -1778,6 +1914,7 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                 }),
                 content: content.clone(),
                 reply_to_id: reply_to.clone(),
+                attachments: attachments.clone(),
                 created_at: time::OffsetDateTime::now_utc()
                     .format(&time::format_description::well_known::Rfc3339)
                     .unwrap_or_default(),
@@ -1797,6 +1934,7 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                 temp_id,
                 content,
                 reply_to,
+                attachments,
             });
             refresh(&app, &state, &tasks);
         }
@@ -1867,6 +2005,84 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
         let tasks = tasks.clone();
         move |id| {
             let _ = tasks.send(Task::DeleteMessage(id.to_string()));
+        }
+    });
+
+    app.on_edit_message({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let channel = state_ref.store.selected_channel.clone();
+            let Some(message) = state_ref
+                .store
+                .messages_in(&channel)
+                .iter()
+                .find(|m| m.id == id.as_str())
+                .cloned()
+            else {
+                return;
+            };
+            // Only your own, and never one that has not been stored yet.
+            if message.author_id() != Some(state_ref.store.me.member.id.as_str()) || message.pending
+            {
+                return;
+            }
+            state_ref.editing = Some(id.to_string());
+            drop(state_ref);
+
+            // The editor opens with the message as written, not as rendered:
+            // you edit the markdown, not the result of it.
+            app.set_edit_draft(message.content.clone().into());
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_cancel_edit({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().editing = None;
+            app.set_edit_draft(SharedString::new());
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_save_edit({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |text| {
+            let Some(app) = weak.upgrade() else { return };
+            let content = text.trim().to_string();
+            let mut state_ref = state.borrow_mut();
+            let Some(id) = state_ref.editing.take() else {
+                return;
+            };
+            let channel = state_ref.store.selected_channel.clone();
+            let unchanged = state_ref
+                .store
+                .messages_in(&channel)
+                .iter()
+                .find(|m| m.id == id)
+                .is_some_and(|m| m.content == content);
+            drop(state_ref);
+
+            app.set_edit_draft(SharedString::new());
+            // An empty edit is a delete in the web client; here it is simply
+            // refused, because the delete path has a confirmation and losing
+            // a message to a stray backspace should not be possible.
+            if !content.is_empty() && !unchanged {
+                let _ = tasks.send(Task::EditMessage {
+                    message: id,
+                    content,
+                });
+            }
+            refresh(&app, &state, &tasks);
         }
     });
 
@@ -2053,6 +2269,42 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             state_ref.speaking.clear();
             drop(state_ref);
             refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_remove_attachment({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            state_ref
+                .pending_attachments
+                .retain(|f| f.id != id.as_str());
+            state_ref.attach_notice.clear();
+            drop(state_ref);
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_attach({
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let state_ref = state.borrow();
+            let channel = state_ref.store.selected_channel.clone();
+            if channel.is_empty()
+                || !crate::perms::can(
+                    state_ref.store.permissions_in(&channel),
+                    crate::perms::ATTACH_FILES,
+                )
+            {
+                return;
+            }
+            let max_mb = state_ref.store.instance.max_upload_mb.max(1);
+            drop(state_ref);
+            let _ = tasks.send(Task::Attach { channel, max_mb });
         }
     });
 
@@ -2615,15 +2867,14 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                     app.set_confirm_label("Delete".into());
                     app.set_overlay(ui::Overlay::Confirm);
                 }
-                // Editing in place, channel editing and moderation are
-                // surfaces this client does not carry yet. The entries only
-                // appear to someone who could use them, so saying so beats
-                // silently doing nothing.
-                ("edit", _)
-                | ("edit-channel", _)
-                | ("delete-channel", _)
-                | ("kick", _)
-                | ("ban", _) => {
+                ("edit", Some(MenuTarget::Message(id))) => {
+                    app.invoke_edit_message(id.into());
+                }
+                // Channel editing and moderation are admin surfaces this
+                // client does not carry yet. The entries only appear to
+                // someone who could use them, so saying so beats silently
+                // doing nothing.
+                ("edit-channel", _) | ("delete-channel", _) | ("kick", _) | ("ban", _) => {
                     eprintln!("minichat: {choice} is not available in this client yet");
                 }
                 _ => {}

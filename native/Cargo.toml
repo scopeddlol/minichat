@@ -47,6 +47,10 @@ url = "2"
 # feature worth dropping over it.
 arboard = { version = "3", default-features = false }
 livekit = { version = "0.7", optional = true }
+# The native file picker for attachments. The XDG portal backend rather than
+# GTK: one fewer system library to depend on, and the portal is what a
+# sandboxed install would have to go through anyway.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 
 [features]
 default = []

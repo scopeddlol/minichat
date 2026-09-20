@@ -243,6 +243,10 @@ component Attachment {
 export component MessageItem {
     in property <MessageRow> message;
     in property <bool> revealed-spoilers: false;
+    /// The message being edited in place, if it is this one.
+    in property <string> editing-id;
+    in-out property <string> edit-draft;
+    property <bool> editing: root.editing-id != "" && root.editing-id == root.message.id;
     callback react(string, string);
     callback reply();
     callback edit();
@@ -252,6 +256,8 @@ export component MessageItem {
     callback run-activated(string, int);
     callback open-attachment(string);
     callback context-menu();
+    callback save-edit(string);
+    callback cancel-edit();
 
     property <length> reactions-h: root.message.reactions.length > 0 ? 32px : 0;
     property <length> attachments-h: root.message.attachments.length > 0
@@ -259,11 +265,12 @@ export component MessageItem {
     property <length> header-h: root.message.grouped ? 0px : 22px;
     property <length> reply-h: root.message.reply-author != "" ? 22px : 0px;
     property <length> divider-h: root.message.day-divider != "" ? 44px : 0px;
+    property <length> editing-h: root.editing ? 34px : 0px;
     property <length> marker-h: root.message.unread-marker ? 20px : 0px;
 
     height: root.divider-h + root.marker-h
         + (root.message.system ? 34px
-            : root.reply-h + root.header-h + root.message.body-height
+            : root.reply-h + root.header-h + root.message.body-height + root.editing-h
                 + root.reactions-h + root.attachments-h
                 + (root.message.grouped ? 4px : 10px));
 
@@ -454,8 +461,75 @@ export component MessageItem {
                 }
             }
 
-            // The body: decorations first, then the runs on top.
-            Rectangle {
+            // The body: decorations first, then the runs on top. While it
+            // is being edited the whole thing is replaced by a field, which
+            // is why the height below is the editor's when editing.
+            if root.editing: Rectangle {
+                x: Metrics.body-x;
+                y: root.reply-h + root.header-h + 2px;
+                width: parent.width - Metrics.body-x;
+                height: root.message.body-height + 34px;
+
+                VerticalLayout {
+                    spacing: 6px;
+
+                    Rectangle {
+                        height: max(38px, editor.preferred-height + 18px);
+                        background: Theme.surface-0;
+                        border-radius: Theme.radius-control;
+                        border-width: 1px;
+                        border-color: Theme.accent;
+
+                        HorizontalLayout {
+                            padding-left: 11px;
+                            padding-right: 11px;
+                            editor := TextInput {
+                                text <=> root.edit-draft;
+                                color: Theme.text;
+                                font-size: 14px;
+                                font-family: Theme.font-sans;
+                                wrap: word-wrap;
+                                single-line: false;
+                                vertical-alignment: center;
+                                accepted => { root.save-edit(self.text); }
+                                // Escape abandons the edit, which is what
+                                // every chat client does and what a member
+                                // who opened it by mistake will reach for.
+                                key-pressed(event) => {
+                                    if (event.text == Key.Escape) {
+                                        root.cancel-edit();
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        height: 16px;
+                        Text {
+                            text: "Enter to save";
+                            color: Theme.text-faint;
+                            font-size: 11px;
+                        }
+                        Text {
+                            text: "\u{00b7}";
+                            color: Theme.text-faint;
+                            font-size: 11px;
+                        }
+                        Text {
+                            text: "Escape to cancel";
+                            color: Theme.text-faint;
+                            font-size: 11px;
+                        }
+                    }
+                }
+            }
+
+            if !root.editing: Rectangle {
                 x: Metrics.body-x;
                 y: root.reply-h + root.header-h + 2px;
                 width: parent.width - Metrics.body-x;
@@ -536,7 +610,7 @@ export component MessageItem {
         opacity: root.message.pending ? 0.55 : 1.0;
 
         // --- hover actions ----------------------------------------------
-        if hover.has-hover && !root.message.system: Rectangle {
+        if hover.has-hover && !root.message.system && !root.editing: Rectangle {
             x: parent.width - self.width - Metrics.side-padding;
             y: -12px;
             width: actions.preferred-width + 8px;

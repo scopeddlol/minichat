@@ -16,12 +16,13 @@ import { Icon, Icons } from "icons.slint";
 import { SettingsDialog, ProfileDialog, ConfirmDialog } from "modals.slint";
 import { SidePanel, ContextMenu, EmojiPicker, SearchHit, EmojiEntry, EmojiRow, MenuItem } from "panels.slint";
 import {
-    MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup, ConversationRow
+    MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup, ConversationRow,
+    PendingAttachment
 } from "models.slint";
 
 export {
     Theme, MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup,
-    ConversationRow, SearchHit, EmojiEntry, EmojiRow, MenuItem
+    ConversationRow, SearchHit, EmojiEntry, EmojiRow, MenuItem, PendingAttachment
 }
 
 // Which panel is open beside the chat, if any.
@@ -229,9 +230,12 @@ export component App inherits Window {
     in property <bool> members-open: true;
     in property <bool> can-send: true;
     in property <string> compose-notice;
+    in property <[PendingAttachment]> pending-attachments;
     in property <string> replying-to;
     in property <string> typing-line;
     in-out property <string> draft;
+    in property <string> editing-id;
+    in-out property <string> edit-draft;
     in property <int> direct-unread;
     /// Every unread message, across channels and conversations.
     in property <int> total-unread;
@@ -290,6 +294,7 @@ export component App inherits Window {
     callback channel-menu(string);
     callback send(string);
     callback cancel-reply();
+    callback remove-attachment(string);
     callback attach();
     callback emoji();
     callback typing();
@@ -306,6 +311,8 @@ export component App inherits Window {
     callback open-attachment(string);
     callback body-width-changed(length);
     callback message-menu(string);
+    callback save-edit(string);
+    callback cancel-edit();
     callback scrolled(length, length, length);
     callback open-member(string);
     callback member-menu(string);
@@ -494,9 +501,15 @@ export component App inherits Window {
                 members-open: root.members-open;
                 can-send: root.can-send;
                 compose-notice: root.compose-notice;
+                pending-attachments: root.pending-attachments;
+                remove-attachment(id) => { root.remove-attachment(id); }
                 replying-to: root.replying-to;
                 typing-line: root.typing-line;
                 draft <=> root.draft;
+                editing-id: root.editing-id;
+                edit-draft <=> root.edit-draft;
+                save-edit(text) => { root.save-edit(text); }
+                cancel-edit => { root.cancel-edit(); }
                 send(text) => { root.send(text); }
                 cancel-reply => { root.cancel-reply(); }
                 attach => { root.attach(); }

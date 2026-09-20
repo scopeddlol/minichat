@@ -525,6 +525,133 @@ impl Client {
     }
 }
 
+impl Client {
+    /// Upload a file and get back the attachment to send with a message.
+    ///
+    /// The size is checked before the bytes are read rather than after: the
+    /// server will refuse an oversized upload anyway, and reading a 2GB file
+    /// into memory to be told so is not a good way to find out.
+    pub async fn upload(&self, path: &std::path::Path, max_mb: i64) -> Result<Attachment> {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
+
+        let metadata = tokio::fs::metadata(path)
+            .await
+            .map_err(|e| ApiError::Invalid(format!("Could not read {name}: {e}")))?;
+        let limit = (max_mb.clamp(1, 500) as u64) * 1024 * 1024;
+        if metadata.len() > limit {
+            return Err(ApiError::Invalid(format!(
+                "{name} is larger than this instance's {max_mb} MB limit."
+            )));
+        }
+
+        let bytes = tokio::fs::read(path)
+            .await
+            .map_err(|e| ApiError::Invalid(format!("Could not read {name}: {e}")))?;
+
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(name.clone())
+            .mime_str(mime_for(path))
+            .map_err(|_| ApiError::Invalid("That file type is not supported.".into()))?;
+        let form = reqwest::multipart::Form::new().part("file", part);
+
+        let mut request = self
+            .http
+            .post(format!("{}/api/uploads", self.origin))
+            .multipart(form);
+        if let Some(token) = self.token() {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+
+        let response = request.send().await.map_err(|_| ApiError::Unreachable)?;
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            if status == StatusCode::UNAUTHORIZED {
+                return Err(ApiError::Unauthorised);
+            }
+            let detail = serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_owned))
+                .unwrap_or_else(|| format!("Upload failed ({})", status.as_u16()));
+            return Err(ApiError::Server(detail));
+        }
+
+        serde_json::from_str(&text)
+            .map_err(|e| ApiError::Server(format!("The instance sent something unexpected: {e}")))
+    }
+
+    /// Send a message with attachments already uploaded.
+    pub async fn send_message_with(
+        &self,
+        channel: &str,
+        content: &str,
+        reply_to: Option<&str>,
+        attachments: &[Attachment],
+    ) -> Result<Message> {
+        // The server takes the attachment records back, so they are sent as
+        // they came rather than as bare IDs.
+        let attachments: Vec<serde_json::Value> = attachments
+            .iter()
+            .map(|file| {
+                json!({
+                    "id": file.id,
+                    "filename": file.filename,
+                    "content_type": file.content_type,
+                    "size": file.size,
+                    "width": file.width,
+                    "height": file.height,
+                    "url": file.url,
+                })
+            })
+            .collect();
+
+        self.post(
+            &format!("/channels/{}/messages", encode(channel)),
+            json!({
+                "content": content,
+                "reply_to_id": reply_to,
+                "attachments": attachments,
+            }),
+        )
+        .await
+    }
+}
+
+/// A content type for a path, from its extension.
+///
+/// The server sniffs the bytes itself and is authoritative; this only has to
+/// be good enough that the multipart part is well formed.
+fn mime_for(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("mp4") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
+        Some("mp3") => "audio/mpeg",
+        Some("ogg") => "audio/ogg",
+        Some("wav") => "audio/wav",
+        Some("pdf") => "application/pdf",
+        Some("txt" | "md" | "log") => "text/plain",
+        Some("json") => "application/json",
+        Some("zip") => "application/zip",
+        _ => "application/octet-stream",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,5 +725,29 @@ mod tests {
         // An emoji reaction is a path segment and can contain anything.
         assert_eq!(encode("a/b"), "a%2Fb");
         assert_eq!(encode("👍"), "%F0%9F%91%8D");
+    }
+}
+
+#[cfg(test)]
+mod upload_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn a_files_type_is_taken_from_its_extension() {
+        assert_eq!(mime_for(Path::new("shot.PNG")), "image/png");
+        assert_eq!(mime_for(Path::new("a/b/clip.mp4")), "video/mp4");
+        assert_eq!(mime_for(Path::new("notes.md")), "text/plain");
+    }
+
+    #[test]
+    fn an_unknown_extension_is_still_sendable() {
+        // The server sniffs the bytes and is authoritative; this only has to
+        // produce a well-formed multipart part.
+        assert_eq!(mime_for(Path::new("data.qqq")), "application/octet-stream");
+        assert_eq!(
+            mime_for(Path::new("noextension")),
+            "application/octet-stream"
+        );
     }
 }

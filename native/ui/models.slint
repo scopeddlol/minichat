@@ -62,6 +62,15 @@ export struct AttachmentRow {
     preview-height: length,
 }
 
+// A file uploaded and waiting to go with the next message.
+export struct PendingAttachment {
+    id: string,
+    filename: string,
+    size: string,
+    kind: string,
+    picture: image,
+}
+
 export struct MessageRow {
     id: string,
     author-id: string,

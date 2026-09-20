@@ -5,7 +5,7 @@ import { Icon, Icons } from "icons.slint";
 import { IconButton, Divider, Avatar } from "controls.slint";
 import { MessageItem, Metrics } from "messages.slint";
 import { Composer } from "composer.slint";
-import { MessageRow } from "models.slint";
+import { MessageRow, PendingAttachment } from "models.slint";
 
 export component ChatPane {
     in property <string> channel-name;
@@ -17,9 +17,12 @@ export component ChatPane {
     in property <bool> members-open: true;
     in property <bool> can-send: true;
     in property <string> compose-notice;
+    in property <[PendingAttachment]> pending-attachments;
     in property <string> replying-to;
     in property <string> typing-line;
     in-out property <string> draft;
+    in property <string> editing-id;
+    in-out property <string> edit-draft;
     /// Bumped by the Rust side to ask for a jump to the newest message.
     /// A property rather than a called function because the pane lives
     /// inside an `if`, and an element in a conditional has no id the
@@ -28,6 +31,7 @@ export component ChatPane {
 
     callback send(string);
     callback cancel-reply();
+    callback remove-attachment(string);
     callback attach();
     callback emoji();
     callback typing();
@@ -49,6 +53,8 @@ export component ChatPane {
     }
     callback body-width-changed(length);
     callback message-menu(string);
+    callback save-edit(string);
+    callback cancel-edit();
 
     VerticalLayout {
         // --- header ------------------------------------------------------
@@ -202,6 +208,10 @@ export component ChatPane {
 
                     for message in root.messages: MessageItem {
                         message: message;
+                        editing-id: root.editing-id;
+                        edit-draft <=> root.edit-draft;
+                        save-edit(text) => { root.save-edit(text); }
+                        cancel-edit => { root.cancel-edit(); }
                         react(id, emoji) => { root.react(id, emoji); }
                         reply => { root.reply-to(message.id); }
                         edit => { root.edit-message(message.id); }
@@ -235,6 +245,8 @@ export component ChatPane {
                 draft <=> root.draft;
                 enabled: root.can-send;
                 notice: root.compose-notice;
+                attachments: root.pending-attachments;
+                remove-attachment(id) => { root.remove-attachment(id); }
                 replying-to: root.replying-to;
                 send(text) => { root.send(text); }
                 cancel-reply => { root.cancel-reply(); }
