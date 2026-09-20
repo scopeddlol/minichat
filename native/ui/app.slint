@@ -271,6 +271,7 @@ export component App inherits Window {
     callback open-attachment(string);
     callback body-width-changed(length);
     callback message-menu(string);
+    callback scrolled(length, length, length);
     callback open-member(string);
     callback member-menu(string);
 
@@ -422,6 +423,10 @@ export component App inherits Window {
                 open-attachment(id) => { root.open-attachment(id); }
                 body-width-changed(w) => { root.body-width-changed(w); }
                 message-menu(id) => { root.message-menu(id); }
+                scrolled(distance, content, viewport) => {
+                    root.scrolled(distance, content, viewport);
+                }
+                scroll-to-newest: root.scroll-to-newest;
             }
 
             if root.side-panel != SidePanelKind.none: SidePanel {
@@ -514,6 +519,13 @@ export component App inherits Window {
         chose(id) => { root.menu-chose(id); }
         dismissed => { root.dismiss-overlay(); }
     }
+
+    /// Bumped by Rust to jump the message list to the newest message.
+    ///
+    /// Driven from Rust rather than bound to the model because "should this
+    /// scroll" depends on where the reader was before the message arrived,
+    /// which the markup does not know.
+    in property <int> scroll-to-newest;
 
     // Escape closes whatever is open, innermost first.
     FocusScope {

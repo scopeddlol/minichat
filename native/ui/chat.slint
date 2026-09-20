@@ -20,6 +20,11 @@ export component ChatPane {
     in property <string> replying-to;
     in property <string> typing-line;
     in-out property <string> draft;
+    /// Bumped by the Rust side to ask for a jump to the newest message.
+    /// A property rather than a called function because the pane lives
+    /// inside an `if`, and an element in a conditional has no id the
+    /// surrounding scope can reach.
+    in property <int> scroll-to-newest;
 
     callback send(string);
     callback cancel-reply();
@@ -37,7 +42,11 @@ export component ChatPane {
     callback open-author(string);
     callback run-activated(string, int);
     callback open-attachment(string);
-    callback scrolled(length);
+    callback scrolled(length, length, length);
+
+    changed scroll-to-newest => {
+        self.scroll-to-bottom();
+    }
     callback body-width-changed(length);
     callback message-menu(string);
 
@@ -172,7 +181,19 @@ export component ChatPane {
 
             scroll := Flickable {
                 content-height: stack.preferred-height;
-                content-y <=> root.viewport-y;
+
+                // How far the newest message is below the fold. Reported so
+                // the Rust side can decide whether an arriving message
+                // should scroll the view: it should when you are reading the
+                // bottom of the channel, and must not when you have
+                // deliberately scrolled up.
+                changed content-y => {
+                    root.scrolled(
+                        -self.content-y - (self.content-height - self.height),
+                        self.content-height,
+                        self.height,
+                    );
+                }
 
                 stack := VerticalLayout {
                     padding-top: 20px;
@@ -248,9 +269,8 @@ export component ChatPane {
         }
     }
 
-    in-out property <length> viewport-y;
-
+    /// Jump to the newest message.
     public function scroll-to-bottom() {
-        self.viewport-y = min(0px, scroll.height - scroll.content-height);
+        scroll.content-y = min(0px, scroll.height - scroll.content-height);
     }
 }

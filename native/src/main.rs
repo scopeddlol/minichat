@@ -6,6 +6,7 @@ mod fonts;
 mod format;
 mod gateway;
 mod images;
+mod live;
 mod perms;
 mod screenshot;
 mod settings;
@@ -22,10 +23,59 @@ pub use ui::App;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     format::init_local_offset();
+    let args: Vec<String> = std::env::args().collect();
+
+    // `--live <origin> <user> <pass> [out.png]` signs in to a real instance
+    // and renders what it sent. See src/live.rs.
+    if let Some(index) = args.iter().position(|a| a == "--live") {
+        let at = |offset: usize| args.get(index + offset).map(String::as_str).unwrap_or("");
+        let (origin, user, pass) = (at(1), at(2), at(3));
+        let out = args.get(index + 4).cloned();
+
+        let runtime = tokio::runtime::Runtime::new()?;
+        let (store, report) = runtime.block_on(live::fetch(origin, user, pass))?;
+
+        println!("connected to  {}", report.instance);
+        println!("signed in as  {}", report.me);
+        println!(
+            "permissions   {} (admin panel: {})",
+            report.permissions,
+            perms::can_see_admin_panel(report.permissions)
+        );
+        println!(
+            "channels      {} in {} categories",
+            report.channels, report.categories
+        );
+        println!("members       {}", report.members);
+        println!("roles         {}", report.roles);
+        println!("#{:<12} {} messages", report.channel_name, report.messages);
+
+        if let Some(out) = out {
+            let palette = theme::Palette::resolve(&theme::Branding {
+                accent: theme::Rgb::parse(&store.instance.accent_color)
+                    .unwrap_or(theme::Branding::default().accent),
+                tint: store
+                    .instance
+                    .surface_tint
+                    .as_deref()
+                    .and_then(theme::Rgb::parse),
+                corner_radius: store.instance.corner_radius as f32,
+                light: store.instance.theme_mode == api::types::ThemeMode::Light,
+            });
+            screenshot::capture(&out, 1180, 760, move || {
+                fonts::register();
+                let app = App::new()?;
+                theme::apply(&app, &palette);
+                live::populate(&app, &store, &palette);
+                Ok(app)
+            })?;
+            println!("rendered      {out}");
+        }
+        return Ok(());
+    }
 
     // `--screenshot <file> [width height]` paints one frame headlessly and
     // exits. See src/screenshot.rs for why that exists.
-    let args: Vec<String> = std::env::args().collect();
     if let Some(index) = args.iter().position(|a| a == "--screenshot") {
         let path = args
             .get(index + 1)

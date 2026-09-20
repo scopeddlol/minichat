@@ -42,6 +42,9 @@ pub enum Update {
 #[derive(Debug)]
 pub enum Command {
     Close,
+    /// Tell the channel someone is typing. Sent over the socket rather than
+    /// as a request, the same way the web client sends it.
+    Typing(String),
 }
 
 const HEARTBEAT: Duration = Duration::from_secs(25);
@@ -103,6 +106,8 @@ pub async fn run(
         tokio::select! {
             _ = tokio::time::sleep(backoff_for(attempt)) => {}
             command = commands.recv() => {
+                // Typing notices arriving while disconnected are dropped;
+                // only a close (or a dropped channel) ends the loop.
                 if matches!(command, Some(Command::Close) | None) {
                     let _ = updates.send(Update::Status(Status::Closed));
                     return;
@@ -156,11 +161,25 @@ async fn connect_once(
                 }
             }
 
-            // Either a deliberate close, or a dropped channel meaning the
-            // UI is gone. Both end the connection for good.
-            _ = commands.recv() => {
-                let _ = sink.send(WsMessage::Close(None)).await;
-                return Outcome::Closed;
+            command = commands.recv() => {
+                match command {
+                    Some(Command::Typing(channel)) => {
+                        let frame = serde_json::json!({
+                            "op": "typing",
+                            "channel_id": channel,
+                        })
+                        .to_string();
+                        if sink.send(WsMessage::Text(frame)).await.is_err() {
+                            return if established { Outcome::Connected } else { Outcome::Dropped };
+                        }
+                    }
+                    // A deliberate close, or a dropped channel meaning the
+                    // UI is gone. Both end the connection for good.
+                    Some(Command::Close) | None => {
+                        let _ = sink.send(WsMessage::Close(None)).await;
+                        return Outcome::Closed;
+                    }
+                }
             }
 
             frame = source.next() => {

@@ -253,40 +253,8 @@ pub fn populate(app: &ui::App, palette: &Palette) {
     app.set_loading_messages(false);
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn the_demo_covers_the_cases_the_layout_has_to_get_right() {
-        let demo = super::data();
-        let joined: String = demo.messages.iter().map(|m| m.content.as_str()).collect();
-        assert!(joined.contains("**"), "no bold");
-        assert!(joined.contains('`'), "no code");
-        assert!(joined.contains("```"), "no code block");
-        assert!(joined.contains("||"), "no spoiler");
-        assert!(joined.contains("> "), "no quote");
-        assert!(joined.contains("@ada"), "no mention");
-        assert!(joined.contains("https://"), "no link");
-        assert!(
-            demo.messages.iter().any(|m| m.reply_to_id.is_some()),
-            "no reply"
-        );
-        assert!(
-            demo.messages.iter().any(|m| !m.reactions.is_empty()),
-            "no reactions"
-        );
-        // Two consecutive messages from one author, close in time, so the
-        // grouping path is exercised.
-        assert!(crate::api::types::should_group(
-            Some(&demo.messages[0]),
-            &demo.messages[1]
-        ));
-    }
-}
-
 /// Open one of the dialogs over the demo, for reviewing it headlessly.
 pub fn show_overlay(app: &ui::App, which: &str) {
-    use slint::ComponentHandle;
-
     match which {
         "settings" => {
             app.set_status_draft("building the native client".into());
@@ -380,5 +348,35 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             }])));
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_demo_covers_the_cases_the_layout_has_to_get_right() {
+        let demo = super::data();
+        let joined: String = demo.messages.iter().map(|m| m.content.as_str()).collect();
+        assert!(joined.contains("**"), "no bold");
+        assert!(joined.contains('`'), "no code");
+        assert!(joined.contains("```"), "no code block");
+        assert!(joined.contains("||"), "no spoiler");
+        assert!(joined.contains("> "), "no quote");
+        assert!(joined.contains("@ada"), "no mention");
+        assert!(joined.contains("https://"), "no link");
+        assert!(
+            demo.messages.iter().any(|m| m.reply_to_id.is_some()),
+            "no reply"
+        );
+        assert!(
+            demo.messages.iter().any(|m| !m.reactions.is_empty()),
+            "no reactions"
+        );
+        // Two consecutive messages from one author, close in time, so the
+        // grouping path is exercised.
+        assert!(crate::api::types::should_group(
+            Some(&demo.messages[0]),
+            &demo.messages[1]
+        ));
     }
 }

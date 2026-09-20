@@ -327,23 +327,36 @@ export component MessageItem {
         background: hover.has-hover ? Theme.surface-0.transparentize(0.35) : transparent;
 
         // A system notice is one quiet line, not a message.
+        // A system notice is one quiet line with a dot where the avatar
+        // would be, matching the web client's join notice.
         if root.message.system: HorizontalLayout {
             padding-left: Metrics.side-padding;
             padding-right: Metrics.side-padding;
-            spacing: 10px;
+            spacing: 0px;
             alignment: start;
-            Icon {
-                data: Icons.sparkles;
-                size: 15px;
-                colour: Theme.text-faint;
-                y: (parent.height - self.height) / 2;
+
+            Rectangle {
+                width: Metrics.body-x;
+                Rectangle {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: Theme.success;
+                }
             }
             Text {
                 text: root.message.system-text;
-                color: Theme.text-faint;
+                color: Theme.text-muted;
                 font-size: 13px;
                 vertical-alignment: center;
                 overflow: elide;
+            }
+            Rectangle { width: 10px; }
+            Text {
+                text: root.message.timestamp;
+                color: Theme.text-faint;
+                font-size: 11px;
+                vertical-alignment: center;
             }
         }
 

@@ -66,6 +66,11 @@ enum Task {
         channel: String,
     },
     UpdateStatus(String),
+    Typing(String),
+    LoadOlder {
+        channel: String,
+        before: String,
+    },
     Disconnect,
 }
 
@@ -104,6 +109,10 @@ enum Event {
     ImageFailed(String),
     SearchResults(Vec<Message>),
     Pins(Vec<Message>),
+    OlderMessages {
+        channel: String,
+        messages: Vec<Message>,
+    },
 }
 
 /// Everything the UI thread owns.
@@ -132,7 +141,38 @@ struct AppState {
     reacting_to: Option<String>,
     /// What the open context menu is about.
     menu_target: Option<MenuTarget>,
+
+    /// How far the newest message is below the fold, as the pane last
+    /// reported it. Zero or less means the bottom is on screen.
+    scroll_distance: f32,
+    /// Bumped to ask the pane to jump to the newest message.
+    scroll_token: i32,
+    /// A page of older messages is in flight.
+    loading_older: bool,
+    /// Channels known to have nothing older left, so scrolling to the top
+    /// stops asking for a page that will come back empty.
+    exhausted: Vec<String>,
+    /// The message list's content and viewport heights, as the pane last
+    /// reported them. Needed to turn a distance-from-bottom into "near the
+    /// top", which is what triggers a page back.
+    content_height: f32,
+    viewport_height: f32,
+    /// When typing was last announced, per channel. The gateway notice is
+    /// throttled: one keystroke per frame would be a frame per keystroke.
+    typing_sent: std::collections::HashMap<String, i64>,
 }
+
+/// How close to the bottom counts as "reading the newest messages".
+///
+/// A reader a line or two up is still following along and expects an
+/// arriving message to scroll into view; one who has scrolled up to read
+/// something does not, and moving the view under them is the single most
+/// irritating thing a chat client does.
+const PINNED_WITHIN: f32 = 90.0;
+
+/// How close to the top the reader gets before the next page is fetched.
+/// Far enough ahead that the page usually arrives before they reach the end.
+const PREFETCH_WITHIN: f32 = 400.0;
 
 /// An action held behind a confirmation.
 #[derive(Clone, Debug, PartialEq)]
@@ -166,7 +206,30 @@ impl AppState {
             pending_confirm: None,
             reacting_to: None,
             menu_target: None,
+            scroll_distance: 0.0,
+            scroll_token: 0,
+            loading_older: false,
+            exhausted: Vec::new(),
+            content_height: 0.0,
+            viewport_height: 0.0,
+            typing_sent: std::collections::HashMap::new(),
         }
+    }
+
+    /// Whether the reader is at the bottom of the channel.
+    fn pinned_to_bottom(&self) -> bool {
+        self.scroll_distance <= PINNED_WITHIN
+    }
+
+    /// Whether the reader has scrolled within a screen of the top, which is
+    /// when the next page back is worth fetching.
+    ///
+    /// `distance` is measured from the bottom, so this compares it against
+    /// the whole scrollable height less one screen. The pane reports the
+    /// distance rather than the position, so the comparison is done with
+    /// what the last refresh knew the content height to be.
+    fn scroll_distance_at_top(&self, distance: f32) -> bool {
+        distance >= self.content_height - self.viewport_height - PREFETCH_WITHIN
     }
 
     fn temp_id(&mut self) -> String {
@@ -492,6 +555,25 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 });
             }
 
+            Task::Typing(channel) => {
+                if let Some(tx) = gateway_tx.as_ref() {
+                    let _ = tx.send(gateway::Command::Typing(channel));
+                }
+            }
+
+            Task::LoadOlder { channel, before } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let messages = client
+                        .messages(&channel, Some(&before), None, 50)
+                        .await
+                        .unwrap_or_default();
+                    let _ = events.send(Event::OlderMessages { channel, messages });
+                });
+            }
+
             Task::UpdateStatus(status) => {
                 let Some(client) = client.clone() else {
                     continue;
@@ -611,7 +693,21 @@ fn handle_event(
             true
         }
 
-        Event::Gateway(frame) => state.borrow_mut().store.apply_event(&frame, now),
+        Event::Gateway(frame) => {
+            let mut state_ref = state.borrow_mut();
+            let changed = state_ref.store.apply_event(&frame, now);
+
+            // An arriving message in the open channel follows the reader
+            // down only if they were already at the bottom.
+            if frame.event == "MESSAGE_CREATE" && state_ref.pinned_to_bottom() {
+                let landed_here = frame.data["channel_id"].as_str()
+                    == Some(state_ref.store.selected_channel.as_str());
+                if landed_here {
+                    state_ref.scroll_token += 1;
+                }
+            }
+            changed
+        }
 
         Event::Status(status) => {
             state.borrow_mut().connection = status;
@@ -640,6 +736,12 @@ fn handle_event(
         Event::Messages { channel, messages } => {
             let mut state = state.borrow_mut();
             state.store.set_messages(&channel, messages);
+            if channel == state.store.selected_channel {
+                // Opening a channel puts you at the newest message, the way
+                // every chat client does.
+                state.scroll_token += 1;
+                state.scroll_distance = 0.0;
+            }
             let wanted = view::referenced_images(
                 state.store.messages_in(&channel),
                 &[],
@@ -686,6 +788,18 @@ fn handle_event(
         Event::ImageFailed(url) => {
             state.borrow().images.fail(&url);
             false
+        }
+
+        Event::OlderMessages { channel, messages } => {
+            if messages.is_empty() {
+                // Nothing older exists; stop asking.
+                state.borrow_mut().exhausted.push(channel);
+                return false;
+            }
+            let mut state = state.borrow_mut();
+            state.store.prepend_messages(&channel, messages);
+            state.loading_older = false;
+            true
         }
 
         Event::SearchResults(hits) | Event::Pins(hits) => {
@@ -1066,6 +1180,8 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
         ThemeChoice::Instance => 2,
     });
 
+    app.set_scroll_to_newest(state_ref.scroll_token);
+
     queue_images(&state_ref, tasks);
 }
 
@@ -1179,7 +1295,11 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             }
             drop(state_ref);
 
-            if !cached {
+            if cached {
+                let mut state_ref = state.borrow_mut();
+                state_ref.scroll_token += 1;
+                state_ref.scroll_distance = 0.0;
+            } else {
                 app.set_loading_messages(true);
                 let _ = tasks.send(Task::LoadMessages { channel: id });
             }
@@ -1257,6 +1377,11 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                 pending: true,
                 ..Default::default()
             });
+            drop(state_ref);
+
+            let mut state_ref = state.borrow_mut();
+            state_ref.scroll_token += 1;
+            state_ref.scroll_distance = 0.0;
             drop(state_ref);
 
             app.set_draft(SharedString::new());
@@ -1355,6 +1480,63 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                 message: id.to_string(),
                 pinned: !pinned,
             });
+        }
+    });
+
+    app.on_typing({
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            let mut state_ref = state.borrow_mut();
+            let channel = state_ref.store.selected_channel.clone();
+            if channel.is_empty() {
+                return;
+            }
+            // The server broadcasts each notice to the whole channel, so
+            // sending one per keystroke would be a frame per keystroke for
+            // everyone. Four seconds is under the eight the indicator
+            // expires at, so a continuous typist never flickers.
+            const THROTTLE: i64 = 4;
+            let last = state_ref.typing_sent.get(&channel).copied().unwrap_or(0);
+            if now - last < THROTTLE {
+                return;
+            }
+            state_ref.typing_sent.insert(channel.clone(), now);
+            drop(state_ref);
+            let _ = tasks.send(Task::Typing(channel));
+        }
+    });
+
+    app.on_scrolled({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |distance, content, viewport| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            state_ref.scroll_distance = distance;
+            state_ref.content_height = content;
+            state_ref.viewport_height = viewport;
+
+            // `distance` counts from the bottom, so a large value means the
+            // reader is near the top and the next page should be fetched.
+            let near_top = distance > 0.0 && state_ref.scroll_distance_at_top(distance);
+            let channel = state_ref.store.selected_channel.clone();
+            let oldest = state_ref
+                .store
+                .messages_in(&channel)
+                .first()
+                .map(|m| m.id.clone());
+
+            if near_top && !state_ref.loading_older && !state_ref.exhausted.contains(&channel) {
+                if let Some(before) = oldest {
+                    state_ref.loading_older = true;
+                    drop(state_ref);
+                    let _ = tasks.send(Task::LoadOlder { channel, before });
+                    let _ = &app;
+                }
+            }
         }
     });
 

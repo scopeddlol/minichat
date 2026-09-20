@@ -152,6 +152,22 @@ fn build_reactions(message: &Message, emojis: &[Emoji], images: &Cache) -> Vec<u
         .collect()
 }
 
+/// The line a system notice renders as.
+///
+/// The server stores these with an empty body and the meaning in
+/// `system_kind`, so the text is composed here — the same sentences the web
+/// client writes in `MessageItem.tsx`. An unrecognised kind falls back to the
+/// stored content, which is empty today but is the right place for a future
+/// kind to put its own wording.
+pub fn system_text(message: &Message) -> String {
+    match message.system_kind.as_deref() {
+        Some("member_join") => format!("{} joined the instance.", message.author_name()),
+        _ if !message.content.is_empty() => message.content.clone(),
+        Some(other) => format!("{other} \u{2014} {}", message.author_name()),
+        None => String::new(),
+    }
+}
+
 /// A short, single-line version of a message, for a reply preview.
 pub fn excerpt(message: &Message, limit: usize) -> String {
     let flattened: String = message
@@ -290,7 +306,7 @@ pub fn build_messages_with_roles(
                 pending: message.pending,
                 failed: message.failed,
                 system: message.is_system(),
-                system_text: message.content.clone().into(),
+                system_text: system_text(message).into(),
                 day_divider: day_divider.into(),
                 unread_marker: context.first_unread == Some(message.id.as_str()),
                 runs: ModelRc::new(VecModel::from(runs)),
@@ -526,6 +542,44 @@ mod tests {
 
         let urls = referenced_images(&[message.clone(), message], &[], &emojis);
         assert_eq!(urls, vec!["/a.png", "/b.png", "/c.png"]);
+    }
+
+    #[test]
+    fn a_join_notice_gets_a_sentence_rather_than_an_empty_line() {
+        // The server stores these with an empty body, so a client that shows
+        // `content` shows nothing at all — which is what it did.
+        let joined = Message {
+            system_kind: Some("member_join".into()),
+            content: String::new(),
+            author: Some(MessageAuthor {
+                id: "ada".into(),
+                display_name: "Ada Lovelace".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(system_text(&joined), "Ada Lovelace joined the instance.");
+        assert!(joined.is_system());
+    }
+
+    #[test]
+    fn an_unknown_system_kind_still_says_something() {
+        let future = Message {
+            system_kind: Some("channel_renamed".into()),
+            author: Some(MessageAuthor {
+                display_name: "Grace".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(system_text(&future).contains("Grace"));
+        // And one that carries its own wording uses it.
+        let worded = Message {
+            system_kind: Some("anything".into()),
+            content: "The channel was renamed.".into(),
+            ..Default::default()
+        };
+        assert_eq!(system_text(&worded), "The channel was renamed.");
     }
 
     #[test]
