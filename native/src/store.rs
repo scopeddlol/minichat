@@ -62,6 +62,7 @@ pub struct Store {
     pub voice_enabled: bool,
     pub livekit_url: String,
     pub ready: bool,
+    pub notifications: NotificationPreferences,
 }
 
 impl Store {
@@ -87,6 +88,7 @@ impl Store {
         self.members = payload.members;
         self.emojis = payload.emojis;
         self.voice_states = payload.voice_states;
+        self.notifications = payload.notifications;
         self.unread = payload.unread;
         self.mentions = payload.mentions;
         self.voice_enabled = payload.voice_enabled;

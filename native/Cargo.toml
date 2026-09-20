@@ -51,6 +51,13 @@ livekit = { version = "0.7", optional = true }
 # GTK: one fewer system library to depend on, and the portal is what a
 # sandboxed install would have to go through anyway.
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+# Desktop notifications. The web client gets these through Web Push and a
+# service worker; a native client talks to the desktop directly, which also
+# means they work with the app closed to the tray rather than only in a tab.
+# `zbus` rather than the default `dbus`: it is pure Rust, so a Linux build
+# needs no libdbus headers. Windows and macOS use their own backends and
+# ignore this.
+notify-rust = { version = "4", default-features = false, features = ["z"] }
 
 [features]
 default = []
@@ -59,6 +66,12 @@ default = []
 # Linux, and because everything else in this client builds and tests without
 # it. See src/voice.rs.
 voice = ["dep:livekit"]
+
+# The tray lives on the platforms that ship. Linux would pull in GTK or
+# libayatana-appindicator, which is a system dependency the rest of this
+# client does not have and does not want for one icon.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+tray-icon = "0.19"
 
 [build-dependencies]
 slint-build = "1.18"

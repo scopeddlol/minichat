@@ -112,11 +112,20 @@ Connect to an instance, sign in, and:
   presence, role and channel changes, and permission changes
 - Search, pinned messages, member profiles, an emoji picker, right-click
   menus, and a settings dialog with dark/light/instance themes
+- Direct messages: a conversation list, unread counts, optimistic sending
+- Inline message editing, file attachments through the native picker, and
+  scroll-back pagination
+- Voice channels: join, leave, mute, deafen, who is in the room and who is
+  speaking. Audio itself needs the `voice` feature — see below
+- Desktop notifications, honouring the member's per-channel preferences
+- A tray icon with the same menu the Tauri shell has, and close-to-tray
+- Keyboard shortcuts: Ctrl/Cmd+K and Ctrl/Cmd+F to search, Alt+Up and
+  Alt+Down to walk channels, Ctrl/Cmd+Shift+M and +D for mute and deafen,
+  Escape to back out of whatever is open
 - Frameless window with its own caption bar, matching the Tauri shell's
 
-Not yet: **voice and video**, direct messages, the admin panel, file uploads,
-scroll-back pagination, inline editing, the tray icon and global hotkeys.
-Voice is the large one — see below.
+Not yet: **voice and video media** (see below), the admin panel, direct
+calls, and global hotkeys that work while the app is in the background.
 
 ## Memory
 
@@ -138,15 +147,31 @@ idle case, which is the case being complained about.
 
 ## Outstanding
 
-- **Voice and video.** The LiveKit Rust SDK, I420 frame rendering, device
-  enumeration and hot-plug, the audio processing module (echo cancellation,
-  gain, noise suppression), camera, screen share, push-to-talk, per-member
-  volume and speaking indicators. This is the largest remaining piece by a
-  wide margin, and it is where the schedule will be decided.
+- **Voice and video media.** The control plane is done — joining, leaving,
+  the room's membership, mute and deafen, the sidebar panel. What is missing
+  is the audio itself: `src/voice.rs` defines the `Engine` trait and says
+  exactly what an implementation has to do, in the order the join path calls
+  it. Beyond that trait: I420 frame rendering for camera and screen share,
+  device enumeration and hot-plug, and the audio processing module (echo
+  cancellation, gain, noise suppression).
+
+  Build it with `cargo build --features voice`. That pulls in `livekit` and,
+  under it, roughly 200MB of prebuilt libwebrtc. The artifact downloads
+  cleanly; linking it on Linux needs **clang 21 or newer**, because the
+  hermetic libc++ it ships with requires it. Ubuntu 24.04 tops out at clang
+  18, so a Linux build needs a toolchain from apt.llvm.org. Windows links
+  against MSVC and has no such constraint.
+
+  This is the largest remaining piece by a wide margin, and it is where the
+  schedule will be decided.
 - **The session token is a plain file.** `src/settings.rs` writes it
   user-only where the platform allows, which is no worse than the web
   client's `localStorage`, but it is not the OS credential store and should
   be.
+- **The tray is Windows and macOS only.** `tray-icon` needs GTK or
+  libayatana-appindicator on Linux, which is a system dependency the rest of
+  this client does not have. `tray::available()` reports it, and the window
+  refuses to hide itself where there is no tray to restore it from.
 - **Colour emoji depend on the system font.** Windows has Segoe UI Emoji, so
   the ship target is fine; a Linux box with no colour emoji font renders them
   monochrome.

@@ -48,6 +48,11 @@ pub struct Settings {
 
     #[serde(default)]
     pub last_channel: Option<String>,
+
+    /// Whether closing the window hides it to the tray instead of quitting.
+    /// The same setting the Tauri shell keeps, under the same name.
+    #[serde(default = "default_true")]
+    pub close_to_tray: bool,
 }
 
 fn default_true() -> bool {
@@ -67,6 +72,7 @@ impl Default for Settings {
             collapsed_categories: Vec::new(),
             members_open: default_true(),
             last_channel: None,
+            close_to_tray: default_true(),
         }
     }
 }
@@ -141,6 +147,7 @@ mod tests {
         let empty: Settings = serde_json::from_str("{}").unwrap();
         let fresh = Settings::default();
         assert_eq!(empty.members_open, fresh.members_open);
+        assert_eq!(empty.close_to_tray, fresh.close_to_tray);
         assert_eq!(empty.theme, fresh.theme);
         assert_eq!(empty.instance_url, fresh.instance_url);
     }
@@ -202,6 +209,7 @@ mod tests {
             collapsed_categories: vec!["c1".into()],
             members_open: false,
             last_channel: Some("general".into()),
+            close_to_tray: false,
         };
         let restored: Settings =
             serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();

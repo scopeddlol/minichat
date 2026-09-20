@@ -7,12 +7,14 @@ mod format;
 mod gateway;
 mod images;
 mod live;
+mod notify;
 mod perms;
 mod screenshot;
 mod settings;
 mod store;
 mod text;
 mod theme;
+mod tray;
 mod view;
 mod voice;
 

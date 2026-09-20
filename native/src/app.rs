@@ -194,6 +194,9 @@ struct AppState {
     profile: Option<String>,
     /// What the open confirmation will do if confirmed.
     pending_confirm: Option<Confirm>,
+    /// Whether the window has focus. A notification for something already
+    /// on screen is noise.
+    window_focused: bool,
     /// Files uploaded and waiting to go with the next message.
     pending_attachments: Vec<Attachment>,
     /// Why the last attachment did not upload.
@@ -274,6 +277,7 @@ impl AppState {
             panel_loading: false,
             profile: None,
             pending_confirm: None,
+            window_focused: true,
             pending_attachments: Vec::new(),
             attach_notice: String::new(),
             editing: None,
@@ -364,12 +368,18 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
             }
         })?;
 
+    // The tray, on the platforms that have one. Moved into the pump, which
+    // holds it for the life of the app — dropping it takes the icon out of
+    // the tray.
+    let tray = crate::tray::Tray::new(state.borrow().settings.close_to_tray);
+
     // Events come back on the runtime thread and are drained here, on the UI
     // thread, where the store lives.
     let pump = {
         let weak = app.as_weak();
         let state = state.clone();
         let tasks = task_tx.clone();
+        let tray_handle = tray;
         move || {
             let Some(app) = weak.upgrade() else { return };
             let mut dirty = false;
@@ -393,6 +403,10 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
                     state_ref.speaking.clear();
                     dirty = true;
                 }
+            }
+
+            for action in tray_handle.as_ref().map(|t| t.poll()).unwrap_or_default() {
+                dirty |= handle_tray(action, &app, &state, &tasks, tray_handle.as_ref());
             }
 
             if dirty {
@@ -930,6 +944,67 @@ fn handle_event(
             let mut state_ref = state.borrow_mut();
             let changed = state_ref.store.apply_event(&frame, now);
 
+            // Notifications are decided from the message rather than from the
+            // server's MENTION_ADD: the two can arrive in either order, and a
+            // notification that fires on the wrong one is late or doubled.
+            if frame.event == "MESSAGE_CREATE" {
+                if let Ok(message) = serde_json::from_value::<Message>(frame.data.clone()) {
+                    let focused = app.window().is_visible()
+                        && state_ref.window_focused
+                        && !state_ref.store.inbox_open
+                        && message.channel_id == state_ref.store.selected_channel;
+
+                    if crate::notify::should_notify(
+                        &message,
+                        &state_ref.store.me.member.id,
+                        &state_ref.store.members,
+                        &state_ref.store.notifications,
+                        focused,
+                    ) {
+                        let channel = state_ref
+                            .store
+                            .channel(&message.channel_id)
+                            .map(|c| format!("#{}", c.name))
+                            .unwrap_or_default();
+                        let title = if channel.is_empty() {
+                            message.author_name().to_string()
+                        } else {
+                            format!("{} in {channel}", message.author_name())
+                        };
+                        // The body is the message as written, minus the
+                        // markup, so a notification is readable rather than
+                        // full of asterisks.
+                        let context = crate::text::markdown::Context {
+                            members: &state_ref.store.members,
+                            emojis: &state_ref.store.emojis,
+                            me_id: &state_ref.store.me.member.id,
+                        };
+                        let body = crate::text::markdown::to_plain(&crate::text::markdown::parse(
+                            &message.content,
+                            &context,
+                        ));
+                        crate::notify::show(&title, &body);
+                    }
+                }
+            }
+
+            if frame.event == "DIRECT_MESSAGE" {
+                if let Ok(direct) = serde_json::from_value::<DirectMessage>(frame.data.clone()) {
+                    let reading_it = state_ref.window_focused
+                        && state_ref.store.inbox_open
+                        && state_ref.store.selected_conversation == direct.conversation_id;
+                    let mine = direct.author_id == state_ref.store.me.member.id;
+                    if !mine && !reading_it {
+                        let from = state_ref
+                            .store
+                            .member(&direct.author_id)
+                            .map(|m| m.name().to_string())
+                            .unwrap_or_else(|| "Someone".into());
+                        crate::notify::show(&from, &direct.content);
+                    }
+                }
+            }
+
             // An arriving message in the open channel follows the reader
             // down only if they were already at the bottom.
             if frame.event == "MESSAGE_CREATE" && state_ref.pinned_to_bottom() {
@@ -1182,6 +1257,47 @@ fn emoji_rows(entries: Vec<ui::EmojiEntry>) -> Vec<ui::EmojiRow> {
             entries: ModelRc::new(VecModel::from(chunk.to_vec())),
         })
         .collect()
+}
+
+/// Act on a tray menu choice. Returns true when the UI needs rebuilding.
+fn handle_tray(
+    action: crate::tray::Action,
+    app: &ui::App,
+    state: &Shared,
+    tasks: &mpsc::UnboundedSender<Task>,
+    tray: Option<&crate::tray::Tray>,
+) -> bool {
+    match action {
+        crate::tray::Action::Open => {
+            // Back from the tray, or from being minimised.
+            app.window().set_minimized(false);
+            app.show().ok();
+            false
+        }
+
+        crate::tray::Action::SwitchInstance => {
+            app.invoke_forget_instance();
+            false
+        }
+
+        crate::tray::Action::ToggleCloseToTray => {
+            let mut state_ref = state.borrow_mut();
+            state_ref.settings.close_to_tray = !state_ref.settings.close_to_tray;
+            let enabled = state_ref.settings.close_to_tray;
+            let _ = state_ref.settings.store();
+            drop(state_ref);
+            if let Some(tray) = tray {
+                tray.set_close_to_tray(enabled);
+            }
+            false
+        }
+
+        crate::tray::Action::Quit => {
+            let _ = tasks.send(Task::Disconnect);
+            let _ = slint::quit_event_loop();
+            false
+        }
+    }
 }
 
 /// Which images the current view wants that are not loaded yet.
@@ -1862,6 +1978,46 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
         }
     });
 
+    app.on_focus_changed({
+        let state = state.clone();
+        move |focused| {
+            state.borrow_mut().window_focused = focused;
+        }
+    });
+
+    app.on_step_channel({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move |direction| {
+            let Some(app) = weak.upgrade() else { return };
+            let state_ref = state.borrow();
+            // Only the channels you can actually open, in the order the
+            // sidebar shows them — so Alt+Down does not land on a voice
+            // channel and silently try to join it.
+            let openable: Vec<String> = state_ref
+                .store
+                .channels
+                .iter()
+                .filter(|c| c.kind != ChannelKind::Voice)
+                .map(|c| c.id.clone())
+                .collect();
+            if openable.is_empty() {
+                return;
+            }
+            let current = openable
+                .iter()
+                .position(|id| id == &state_ref.store.selected_channel)
+                .unwrap_or(0) as i32;
+            // Wraps, so the list has no dead ends at either end.
+            let count = openable.len() as i32;
+            let next = (current + direction).rem_euclid(count) as usize;
+            let target = openable[next].clone();
+            drop(state_ref);
+
+            app.invoke_select_channel(target.into());
+        }
+    });
+
     app.on_toggle_members({
         let weak = app.as_weak();
         let state = state.clone();
@@ -2417,8 +2573,29 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
         }
     });
 
-    app.on_quit(move || {
-        let _ = slint::quit_event_loop();
+    app.on_quit({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let state_ref = state.borrow();
+            // Hiding is only offered where there is a tray to restore from,
+            // and only once signed in: a first-run member who hides the
+            // connect screen is left with an app that appears not to have
+            // started.
+            let hide = state_ref.settings.close_to_tray
+                && crate::tray::available()
+                && state_ref.store.ready;
+            drop(state_ref);
+
+            if hide {
+                let _ = app.hide();
+                return;
+            }
+            let _ = tasks.send(Task::Disconnect);
+            let _ = slint::quit_event_loop();
+        }
     });
 
     // --- overlays ------------------------------------------------------------

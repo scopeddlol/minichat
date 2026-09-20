@@ -313,6 +313,8 @@ export component App inherits Window {
     callback message-menu(string);
     callback save-edit(string);
     callback cancel-edit();
+    callback step-channel(int);
+    callback focus-changed(bool);
     callback scrolled(length, length, length);
     callback open-member(string);
     callback member-menu(string);
@@ -365,6 +367,74 @@ export component App inherits Window {
     callback minimise();
     callback toggle-maximise();
     callback quit();
+
+    // Application shortcuts.
+    //
+    // A key reaches the focused element first — the composer, a field — and
+    // only bubbles here if that element rejects it. That is what lets Ctrl+K
+    // work while typing without the plain letters being swallowed.
+    keys := FocusScope {
+        // Whether the window has focus, so a notification is not raised for
+        // something the member is already looking at.
+        focus-changed-event => { root.focus-changed(self.has-focus); }
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                if (root.overlay != Overlay.none) {
+                    root.dismiss-overlay();
+                    return accept;
+                }
+                if (root.editing-id != "") {
+                    root.cancel-edit();
+                    return accept;
+                }
+                if (root.replying-to != "") {
+                    root.cancel-reply();
+                    return accept;
+                }
+                if (root.side-panel != SidePanelKind.none) {
+                    root.close-panel();
+                    return accept;
+                }
+                return reject;
+            }
+
+            if (root.screen != Screen.chat) {
+                return reject;
+            }
+
+            // Ctrl/Cmd+K opens search, as it does in the web client.
+            if ((event.modifiers.control || event.modifiers.meta) && event.text == "k") {
+                root.open-search();
+                return accept;
+            }
+            // Ctrl/Cmd+F is the same thing; people reach for both.
+            if ((event.modifiers.control || event.modifiers.meta) && event.text == "f") {
+                root.open-search();
+                return accept;
+            }
+            // Ctrl/Cmd+Shift+M mutes, as in the voice panel.
+            if ((event.modifiers.control || event.modifiers.meta)
+                && event.modifiers.shift && event.text == "M") {
+                root.toggle-mute();
+                return accept;
+            }
+            if ((event.modifiers.control || event.modifiers.meta)
+                && event.modifiers.shift && event.text == "D") {
+                root.toggle-deafen();
+                return accept;
+            }
+            // Alt+Up / Alt+Down walk the channel list.
+            if (event.modifiers.alt && event.text == Key.UpArrow) {
+                root.step-channel(-1);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.DownArrow) {
+                root.step-channel(1);
+                return accept;
+            }
+            return reject;
+        }
 
     VerticalLayout {
         TitleBar {
@@ -560,6 +630,7 @@ export component App inherits Window {
 
         }
     }
+    }
 
     // --- overlays, above everything ------------------------------------
     if root.overlay == Overlay.settings: SettingsDialog {
@@ -635,20 +706,4 @@ export component App inherits Window {
     /// which the markup does not know.
     in property <int> scroll-to-newest;
 
-    // Escape closes whatever is open, innermost first.
-    FocusScope {
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                if (root.overlay != Overlay.none) {
-                    root.dismiss-overlay();
-                    return accept;
-                }
-                if (root.side-panel != SidePanelKind.none) {
-                    root.close-panel();
-                    return accept;
-                }
-            }
-            return reject;
-        }
-    }
 }
