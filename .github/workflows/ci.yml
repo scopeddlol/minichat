@@ -57,17 +57,6 @@ jobs:
         working-directory: desktop
         run: cargo test --locked
 
-  desktop-native:
-    name: Chromium-free Windows preview
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - run: dotnet build desktop-native/MiniChat.Native.csproj -c Release
-      - run: dotnet run --project desktop-native-tests/MiniChat.Native.Tests.csproj
-
   # The Rust + Slint client. Built on Linux as well as Windows: Windows is
   # what ships, and Linux is where the headless screenshot runs, which is the
   # only check that the interface still lays out rather than merely compiles.

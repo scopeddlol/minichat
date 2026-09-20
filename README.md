@@ -157,12 +157,16 @@ Installing matters on iPhone and iPad: Safari only delivers push notifications
 to apps on the Home Screen, never to a browser tab. Settings → **Notifications**
 says so in place of the toggle when it detects that situation.
 
-### Chromium-free Windows preview
+### Chromium-free desktop client
 
-The migration has started in [desktop-native](desktop-native/README.md): a native
-WPF client for sign-in, channel browsing and text messaging. It builds without
-Chromium or WebView2. Voice/video, DMs and administration still need porting, so
-the full-featured installer below remains available during the transition.
+[native](native/README.md) is a Rust client with [Slint](https://slint.dev) for
+the interface and no browser engine at all. It holds about 30 MB idle where the
+WebView2 shell holds several hundred, and ships as one binary with no runtime to
+install beside it.
+
+It covers channels, messages, direct messages, voice, search, administration and
+the rest of the daily surface. The Tauri installer below remains the released
+build until the native one has been through accessibility testing on Windows.
 
 ### Windows desktop app
 

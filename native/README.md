@@ -11,10 +11,11 @@ the shell.
 
 This is that rewrite.
 
-## Why Rust rather than the C# preview
+## Why Rust
 
-`desktop-native/` began the same migration in .NET/WPF. Two things argue
-against finishing it there:
+An earlier attempt at this migration used .NET and WPF. Two things argued
+against finishing it there, and they are worth recording because they are the
+reason this client exists in the language it does:
 
 - **LiveKit has no C# client SDK.** The official clients are JS, Swift,
   Kotlin, Flutter, Unity, React Native and **Rust**. Voice and video are this
