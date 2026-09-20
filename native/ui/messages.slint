@@ -491,11 +491,19 @@ export component MessageItem {
                                 wrap: word-wrap;
                                 single-line: false;
                                 vertical-alignment: center;
-                                accepted => { root.save-edit(self.text); }
-                                // Escape abandons the edit, which is what
-                                // every chat client does and what a member
-                                // who opened it by mistake will reach for.
+
                                 key-pressed(event) => {
+                                    // Enter saves, Shift+Enter adds a line.
+                                    // Intercepted rather than left to
+                                    // `accepted`, which Slint only raises on
+                                    // a single-line input.
+                                    if (event.text == Key.Return && !event.modifiers.shift) {
+                                        root.save-edit(self.text);
+                                        return accept;
+                                    }
+                                    // Escape abandons the edit, which is what
+                                    // a member who opened it by mistake will
+                                    // reach for.
                                     if (event.text == Key.Escape) {
                                         root.cancel-edit();
                                         return accept;

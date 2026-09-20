@@ -25,6 +25,12 @@ export component Composer {
     callback typing();
     callback remove-attachment(string);
 
+    /// Bumped to put the caret in the composer. A property rather than a
+    /// called function because the composer lives inside an `if`, and an
+    /// element in a conditional has no id the surrounding scope can reach.
+    in property <int> focus-token;
+    changed focus-token => { input.focus(); }
+
     property <length> attachments-h: root.attachments.length > 0 ? 82px : 0px;
 
     height: 16px + root.attachments-h + (root.replying-to != "" ? 34px : 0px)
@@ -183,9 +189,21 @@ export component Composer {
                             single-line: false;
                             enabled: root.enabled;
                             edited => { root.typing(); }
-                            // Enter sends; Shift+Enter is handled by the key
-                            // handler below, which inserts a newline instead.
-                            accepted => { root.send(self.text); }
+
+                            // Enter sends, Shift+Enter inserts a newline.
+                            //
+                            // This has to be intercepted rather than left to
+                            // `accepted`: Slint only raises that callback on
+                            // a single-line input, and a composer that grows
+                            // with the draft is not one. Without this the
+                            // Enter key silently does nothing but add a line.
+                            key-pressed(event) => {
+                                if (event.text == Key.Return && !event.modifiers.shift) {
+                                    root.send(self.text);
+                                    return accept;
+                                }
+                                return reject;
+                            }
                         }
                     }
 

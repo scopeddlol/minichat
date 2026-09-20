@@ -214,6 +214,8 @@ struct AppState {
     scroll_distance: f32,
     /// Bumped to ask the pane to jump to the newest message.
     scroll_token: i32,
+    /// Bumped to put the caret back in the composer.
+    focus_token: i32,
     /// A page of older messages is in flight.
     loading_older: bool,
     /// Channels known to have nothing older left, so scrolling to the top
@@ -285,6 +287,7 @@ impl AppState {
             menu_target: None,
             scroll_distance: 0.0,
             scroll_token: 0,
+            focus_token: 0,
             loading_older: false,
             exhausted: Vec::new(),
             content_height: 0.0,
@@ -1819,6 +1822,7 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
     );
 
     app.set_scroll_to_newest(state_ref.scroll_token);
+    app.set_focus_composer(state_ref.focus_token);
 
     queue_images(&state_ref, tasks);
 }
@@ -1951,6 +1955,7 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             }
             drop(state_ref);
 
+            state.borrow_mut().focus_token += 1;
             if cached {
                 let mut state_ref = state.borrow_mut();
                 state_ref.scroll_token += 1;
@@ -2602,6 +2607,7 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
     app.on_dismiss_overlay({
         let weak = app.as_weak();
         let state = state.clone();
+        let tasks = tasks.clone();
         move || {
             let Some(app) = weak.upgrade() else { return };
             let mut state_ref = state.borrow_mut();
@@ -2609,9 +2615,11 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             state_ref.pending_confirm = None;
             state_ref.reacting_to = None;
             state_ref.menu_target = None;
+            state_ref.focus_token += 1;
             drop(state_ref);
             app.set_overlay(ui::Overlay::None);
             app.set_emoji_filter(SharedString::new());
+            refresh(&app, &state, &tasks);
         }
     });
 

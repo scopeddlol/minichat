@@ -28,6 +28,7 @@ export component ChatPane {
     /// inside an `if`, and an element in a conditional has no id the
     /// surrounding scope can reach.
     in property <int> scroll-to-newest;
+    in property <int> focus-composer;
 
     callback send(string);
     callback cancel-reply();
@@ -246,6 +247,7 @@ export component ChatPane {
                 enabled: root.can-send;
                 notice: root.compose-notice;
                 attachments: root.pending-attachments;
+                focus-token: root.focus-composer;
                 remove-attachment(id) => { root.remove-attachment(id); }
                 replying-to: root.replying-to;
                 send(text) => { root.send(text); }

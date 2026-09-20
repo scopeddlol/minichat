@@ -15,6 +15,7 @@ mod store;
 mod text;
 mod theme;
 mod tray;
+mod uitest;
 mod view;
 mod voice;
 

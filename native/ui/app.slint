@@ -186,6 +186,9 @@ export component App inherits Window {
     min-width: 420px;
     min-height: 520px;
     no-frame: true;
+    // The shortcut scope holds focus until something else takes it, so
+    // Escape and Ctrl+K work before anyone has clicked anything.
+    forward-focus: keys;
 
     in property <Screen> screen: Screen.connect;
     in property <bool> maximised: false;
@@ -602,6 +605,7 @@ export component App inherits Window {
                     root.scrolled(distance, content, viewport);
                 }
                 scroll-to-newest: root.scroll-to-newest;
+                focus-composer: root.focus-composer;
             }
 
             if root.side-panel != SidePanelKind.none && !root.inbox-open: SidePanel {
@@ -705,5 +709,9 @@ export component App inherits Window {
     /// scroll" depends on where the reader was before the message arrived,
     /// which the markup does not know.
     in property <int> scroll-to-newest;
+
+    /// Bumped to put the caret back in the composer — after a channel
+    /// change, after a dialog closes, and when the window is first shown.
+    in property <int> focus-composer;
 
 }
