@@ -1,0 +1,327 @@
+// Direct messages.
+//
+// `.inbox`, `.inbox-list` and `.inbox-thread` in the web client: a list of
+// conversations beside the open one. The thread reuses the channel message
+// list, because a direct message is an ordinary message with a conversation
+// in place of a channel.
+
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+import { Avatar, CountPill, Divider, IconButton, TextField } from "controls.slint";
+import { MessageItem, Metrics } from "messages.slint";
+import { Composer } from "composer.slint";
+import { MessageRow, ConversationRow } from "models.slint";
+
+component ConversationButton {
+    in property <ConversationRow> conversation;
+    in property <bool> selected;
+    callback activated();
+
+    // `.conversation-row { padding: 14px 10px; border-radius: 7px }`
+    height: 62px;
+
+    Rectangle {
+        background: root.selected ? Theme.surface-2
+            : touch.has-hover ? Theme.surface-1 : transparent;
+        border-radius: Theme.radius-control;
+        animate background { duration: Theme.normal; easing: ease-out; }
+
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 12px;
+
+            Avatar {
+                size: 36px;
+                picture: root.conversation.avatar;
+                fallback: root.conversation.avatar-fallback;
+                initials: root.conversation.initials;
+                presence: root.conversation.presence;
+                name: root.conversation.name;
+                y: (parent.height - self.height) / 2;
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.conversation.name;
+                        color: Theme.text;
+                        font-size: 13.6px;
+                        // `.conversation-row strong { font-weight: 550 }`,
+                        // heavier while unread.
+                        font-weight: root.conversation.unread > 0 ? 700 : 550;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: root.conversation.timestamp;
+                        color: Theme.text-faint;
+                        font-size: 10.8px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.conversation.excerpt;
+                        color: root.conversation.unread > 0 ? Theme.text-muted : Theme.text-faint;
+                        font-size: 12.2px;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    if root.conversation.unread > 0: CountPill {
+                        count: root.conversation.unread;
+                        mention: true;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.activated(); }
+    }
+}
+
+export component Inbox {
+    in property <[ConversationRow]> conversations;
+    in property <string> selected;
+    in property <[MessageRow]> messages;
+    in property <string> peer-name;
+    in property <string> peer-presence;
+    in property <image> peer-avatar;
+    in property <color> peer-avatar-fallback;
+    in property <string> peer-initials;
+    in property <bool> loading;
+    in-out property <string> draft;
+    in property <bool> voice-enabled;
+    /// Bumped by Rust to jump to the newest message.
+    in property <int> scroll-to-newest;
+
+    callback open-conversation(string);
+    callback send(string);
+    callback open-peer(string);
+    callback call();
+    callback back();
+    callback body-width-changed(length);
+
+    HorizontalLayout {
+        spacing: 0px;
+
+        // --- the conversation list -------------------------------------
+        Rectangle {
+            // `.inbox-list { width: clamp(220px, 24vw, 310px) }`
+            width: 268px;
+            // Without this the inbox reports the preferred height of its
+            // contents, and the row it sits in — sidebar included — shrinks
+            // to that instead of filling the window.
+            vertical-stretch: 1;
+            background: Theme.surface-0;
+
+            VerticalLayout {
+                Rectangle {
+                    height: 56px;
+                    HorizontalLayout {
+                        padding-left: 18px;
+                        padding-right: 12px;
+                        spacing: 9px;
+                        Icon {
+                            data: Icons.message-square;
+                            size: 16px;
+                            colour: Theme.text-faint;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        Text {
+                            text: "Direct messages";
+                            color: Theme.text;
+                            font-size: 13.5px;
+                            font-weight: 650;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        IconButton {
+                            icon: Icons.arrow-left;
+                            tooltip: "Back to channels";
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.back(); }
+                        }
+                    }
+                }
+                Divider {}
+
+                if root.conversations.length == 0: Text {
+                    text: "No conversations yet.\n\nOpen someone's profile and send them a message.";
+                    color: Theme.text-faint;
+                    font-size: 12.5px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    height: 100px;
+                    vertical-alignment: center;
+                }
+
+                Flickable {
+                    content-height: list.preferred-height;
+                    list := VerticalLayout {
+                        padding: 8px;
+                        spacing: 2px;
+                        for conversation in root.conversations: ConversationButton {
+                            conversation: conversation;
+                            selected: conversation.id == root.selected;
+                            activated => { root.open-conversation(conversation.id); }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                background: Theme.border-soft;
+            }
+        }
+
+        // --- the open conversation ---------------------------------------
+        Rectangle {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            background: Theme.bg;
+
+            if root.selected == "": VerticalLayout {
+                alignment: center;
+                spacing: 10px;
+                Rectangle {
+                    width: 56px;
+                    height: 56px;
+                    x: (parent.width - self.width) / 2;
+                    border-radius: 28px;
+                    background: Theme.surface-2;
+                    Icon {
+                        data: Icons.message-square;
+                        size: 26px;
+                        colour: Theme.text-faint;
+                    }
+                }
+                Text {
+                    text: "Pick a conversation";
+                    color: Theme.text-muted;
+                    font-size: 15px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                }
+            }
+
+            if root.selected != "": VerticalLayout {
+                // --- header -----------------------------------------------
+                Rectangle {
+                    height: 56px;
+                    background: Theme.surface-1;
+                    HorizontalLayout {
+                        padding-left: 20px;
+                        padding-right: 12px;
+                        spacing: 12px;
+
+                        Avatar {
+                            size: 32px;
+                            picture: root.peer-avatar;
+                            fallback: root.peer-avatar-fallback;
+                            initials: root.peer-initials;
+                            presence: root.peer-presence;
+                            name: root.peer-name;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        Text {
+                            text: root.peer-name;
+                            color: Theme.text;
+                            font-size: 15px;
+                            font-weight: 650;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        if root.voice-enabled: IconButton {
+                            icon: Icons.volume;
+                            tooltip: "Start a call";
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.call(); }
+                        }
+                        IconButton {
+                            icon: Icons.user;
+                            tooltip: "View profile";
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.open-peer(root.selected); }
+                        }
+                    }
+                }
+                Divider {}
+
+                // --- history ------------------------------------------------
+                Rectangle {
+                    vertical-stretch: 1;
+                    clip: true;
+
+                    // Mirrored so the handler sits in the same scope as the
+                    // Flickable: an element inside an `if` has no id the
+                    // surrounding scope can reach.
+                    property <int> scroll-token: root.scroll-to-newest;
+                    changed scroll-token => {
+                        thread.content-y = min(0px, thread.height - thread.content-height);
+                    }
+
+                    changed width => {
+                        root.body-width-changed(
+                            self.width - Metrics.side-padding * 2 - Metrics.body-x);
+                    }
+
+                    if root.loading && root.messages.length == 0: Text {
+                        text: "Loading\u{2026}";
+                        color: Theme.text-faint;
+                        font-size: 13px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    if !root.loading && root.messages.length == 0: VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        Text {
+                            text: "This is the start of your conversation with "
+                                + root.peer-name + ".";
+                            color: Theme.text-faint;
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    thread := Flickable {
+                        content-height: stack.preferred-height;
+                        stack := VerticalLayout {
+                            padding-top: 20px;
+                            padding-bottom: 12px;
+                            spacing: 0px;
+                            for message in root.messages: MessageItem {
+                                message: message;
+                                open-author(id) => { root.open-peer(id); }
+                            }
+                        }
+                    }
+                }
+
+                // --- composer -------------------------------------------------
+                Composer {
+                    placeholder: "Message " + root.peer-name;
+                    draft <=> root.draft;
+                    can-attach: false;
+                    send(text) => { root.send(text); }
+                }
+            }
+        }
+    }
+}

@@ -356,6 +356,53 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             app.set_confirm_label("Delete".into());
             app.set_overlay(ui::Overlay::Confirm);
         }
+        "inbox" => {
+            let peer = |id: &str, name: &str, excerpt: &str, when: &str, unread: i32| {
+                ui::ConversationRow {
+                    id: id.into(),
+                    name: name.into(),
+                    excerpt: excerpt.into(),
+                    timestamp: when.into(),
+                    avatar: slint::Image::default(),
+                    avatar_fallback: crate::format::avatar_colour(
+                        id,
+                        crate::theme::Rgb::new(0x5b, 0x6e, 0xe8),
+                    )
+                    .to_slint(),
+                    initials: crate::format::initials(name).into(),
+                    presence: "online".into(),
+                    unread,
+                }
+            };
+            app.set_inbox_open(true);
+            app.set_conversations(ModelRc::new(VecModel::from(vec![
+                peer(
+                    "c1",
+                    "Grace Hopper",
+                    "so what we measure is what gets painted",
+                    "2h ago",
+                    2,
+                ),
+                peer(
+                    "c2",
+                    "Alan Turing",
+                    "that is the part I was worried about",
+                    "yesterday",
+                    0,
+                ),
+                peer("c3", "Katherine Johnson", "shipping it", "Tuesday", 0),
+            ])));
+            app.set_selected_conversation("c1".into());
+            app.set_peer_name("Grace Hopper".into());
+            app.set_peer_initials("GH".into());
+            app.set_peer_presence("online".into());
+            app.set_peer_avatar_fallback(
+                crate::format::avatar_colour("c1", crate::theme::Rgb::new(0x5b, 0x6e, 0xe8))
+                    .to_slint(),
+            );
+            app.set_direct_messages(app.get_messages());
+            app.set_loading_direct(false);
+        }
         "search" => {
             app.set_side_panel(ui::SidePanelKind::Search);
             app.set_panel_query("flow layout".into());

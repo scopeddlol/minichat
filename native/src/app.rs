@@ -70,6 +70,22 @@ enum Task {
     JoinVoice {
         channel: String,
     },
+    LoadConversations,
+    OpenConversation {
+        peer: String,
+    },
+    LoadDirect {
+        conversation: String,
+    },
+    SendDirect {
+        conversation: String,
+        temp_id: String,
+        content: String,
+    },
+    AckDirect {
+        conversation: String,
+        message: String,
+    },
     LoadOlder {
         channel: String,
         before: String,
@@ -123,6 +139,21 @@ enum Event {
     VoiceFailed {
         channel: String,
         error: String,
+    },
+    Conversations(Vec<Conversation>),
+    ConversationOpened(Box<Conversation>),
+    DirectHistory {
+        conversation: String,
+        messages: Vec<DirectMessage>,
+    },
+    DirectSent {
+        conversation: String,
+        temp_id: String,
+        saved: Box<DirectMessage>,
+    },
+    DirectSendFailed {
+        conversation: String,
+        temp_id: String,
     },
 }
 
@@ -621,6 +652,78 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 });
             }
 
+            Task::LoadConversations => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let list = client.conversations().await.unwrap_or_default();
+                    let _ = events.send(Event::Conversations(list));
+                });
+            }
+
+            Task::OpenConversation { peer } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    if let Ok(conversation) = client.open_conversation(&peer).await {
+                        let _ = events.send(Event::ConversationOpened(Box::new(conversation)));
+                    }
+                });
+            }
+
+            Task::LoadDirect { conversation } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let messages = client
+                        .direct_history(&conversation, None)
+                        .await
+                        .unwrap_or_default();
+                    let _ = events.send(Event::DirectHistory {
+                        conversation,
+                        messages,
+                    });
+                });
+            }
+
+            Task::SendDirect {
+                conversation,
+                temp_id,
+                content,
+            } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let _ = match client.send_direct(&conversation, &content).await {
+                        Ok(saved) => events.send(Event::DirectSent {
+                            conversation,
+                            temp_id,
+                            saved: Box::new(saved),
+                        }),
+                        Err(_) => events.send(Event::DirectSendFailed {
+                            conversation,
+                            temp_id,
+                        }),
+                    };
+                });
+            }
+
+            Task::AckDirect {
+                conversation,
+                message,
+            } => {
+                let Some(client) = client.clone() else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let _ = client.ack_direct(&conversation, &message).await;
+                });
+            }
+
             Task::LoadOlder { channel, before } => {
                 let (Some(client), events) = (client.clone(), events.clone()) else {
                     continue;
@@ -895,6 +998,69 @@ fn handle_event(
             true
         }
 
+        Event::Conversations(list) => {
+            state.borrow_mut().store.conversations = list;
+            true
+        }
+
+        Event::ConversationOpened(conversation) => {
+            let mut state_ref = state.borrow_mut();
+            let id = conversation.id.clone();
+            if state_ref.store.conversation(&id).is_none() {
+                state_ref.store.conversations.push(*conversation);
+            }
+            state_ref.store.inbox_open = true;
+            state_ref.store.selected_conversation = id.clone();
+            drop(state_ref);
+            app.set_overlay(ui::Overlay::None);
+            let _ = tasks.send(Task::LoadDirect { conversation: id });
+            true
+        }
+
+        Event::DirectHistory {
+            conversation,
+            messages,
+        } => {
+            let mut state_ref = state.borrow_mut();
+            let last = messages.last().map(|m| m.id.clone());
+            state_ref.store.set_direct(&conversation, messages);
+            if conversation == state_ref.store.selected_conversation {
+                state_ref.scroll_token += 1;
+                state_ref.store.mark_conversation_read(&conversation);
+            }
+            drop(state_ref);
+            if let Some(message) = last {
+                let _ = tasks.send(Task::AckDirect {
+                    conversation,
+                    message,
+                });
+            }
+            true
+        }
+
+        Event::DirectSent {
+            conversation,
+            temp_id,
+            saved,
+        } => {
+            state
+                .borrow_mut()
+                .store
+                .confirm_direct(&conversation, &temp_id, *saved);
+            true
+        }
+
+        Event::DirectSendFailed {
+            conversation,
+            temp_id,
+        } => {
+            state
+                .borrow_mut()
+                .store
+                .fail_direct(&conversation, &temp_id);
+            true
+        }
+
         Event::SearchResults(hits) | Event::Pins(hits) => {
             let mut state = state.borrow_mut();
             state.panel_hits = hits;
@@ -1091,7 +1257,6 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
         });
     }
     app.set_can_send(store.can_send_in(&selected));
-    app.set_direct_unread(store.total_unread() as i32);
 
     let rows = view::build_messages_with_roles(
         store.messages_in(&selected),
@@ -1302,6 +1467,90 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
         ThemeChoice::Light => 1,
         ThemeChoice::Instance => 2,
     });
+
+    // --- direct messages ---------------------------------------------------
+    app.set_inbox_open(store.inbox_open);
+    app.set_direct_unread(store.direct_unread() as i32);
+    app.set_total_unread((store.total_unread() + store.direct_unread()) as i32);
+    app.set_voice_enabled(store.voice_enabled);
+    app.set_selected_conversation(store.selected_conversation.clone().into());
+
+    let conversations: Vec<ui::ConversationRow> = store
+        .conversations
+        .iter()
+        .map(|conversation| {
+            let peer = store.peer(&conversation.id);
+            let name = peer.map(|m| m.name().to_string()).unwrap_or_else(|| {
+                // A conversation whose peer is not in the member list any
+                // more still has to render as something.
+                "Former member".to_string()
+            });
+            let newest = store.direct_in(&conversation.id).last();
+            ui::ConversationRow {
+                id: conversation.id.clone().into(),
+                name: name.clone().into(),
+                excerpt: conversation
+                    .last_content
+                    .as_deref()
+                    .map(|text| crate::format::elide(text.trim(), 60))
+                    .unwrap_or_default()
+                    .into(),
+                timestamp: newest
+                    .map(|m| SharedString::from(crate::format::relative(&m.created_at)))
+                    .unwrap_or_default(),
+                avatar: peer
+                    .and_then(|m| m.avatar_url.as_deref())
+                    .map(|url| state_ref.images.get_or_blank(url))
+                    .unwrap_or_default(),
+                avatar_fallback: crate::format::avatar_colour(&conversation.peer_id, accent)
+                    .to_slint(),
+                initials: crate::format::initials(&name).into(),
+                presence: peer
+                    .map(|m| SharedString::from(format!("{:?}", m.presence).to_lowercase()))
+                    .unwrap_or_default(),
+                unread: conversation.unread as i32,
+            }
+        })
+        .collect();
+    app.set_conversations(ModelRc::new(VecModel::from(conversations)));
+
+    if let Some(peer) = store.peer(&store.selected_conversation) {
+        app.set_peer_name(peer.name().into());
+        app.set_peer_presence(format!("{:?}", peer.presence).to_lowercase().into());
+        app.set_peer_initials(crate::format::initials(peer.name()).into());
+        app.set_peer_avatar_fallback(crate::format::avatar_colour(&peer.id, accent).to_slint());
+        app.set_peer_avatar(
+            peer.avatar_url
+                .as_deref()
+                .map(|url| state_ref.images.get_or_blank(url))
+                .unwrap_or_default(),
+        );
+    }
+
+    // A direct message renders through the same message list as a channel
+    // one, so it is converted rather than given a second renderer.
+    let direct: Vec<Message> = store
+        .direct_in(&store.selected_conversation)
+        .iter()
+        .map(|message| message.as_message(store.member(&message.author_id)))
+        .collect();
+    app.set_direct_messages(ModelRc::new(VecModel::from(
+        view::build_messages_with_roles(
+            &direct,
+            &store.members,
+            &store.emojis,
+            &store.roles,
+            &store.me.member.id,
+            view::MessageContext {
+                width: state_ref.body_width,
+                accent,
+                text: state_ref.palette.text,
+                measurer: &state_ref.measurer,
+                first_unread: None,
+                images: &state_ref.images,
+            },
+        ),
+    )));
 
     // --- voice ------------------------------------------------------------
     let voice = &state_ref.voice;
@@ -1638,6 +1887,112 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                 message: id.to_string(),
                 pinned: !pinned,
             });
+        }
+    });
+
+    // --- direct messages -------------------------------------------------------
+    app.on_open_inbox({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().store.inbox_open = true;
+            let _ = tasks.send(Task::LoadConversations);
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_close_inbox({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().store.inbox_open = false;
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_open_conversation({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let id = id.to_string();
+            let mut state_ref = state.borrow_mut();
+            state_ref.store.selected_conversation = id.clone();
+            state_ref.store.mark_conversation_read(&id);
+            let cached = !state_ref.store.direct_in(&id).is_empty();
+            state_ref.scroll_token += 1;
+            drop(state_ref);
+
+            if !cached {
+                let _ = tasks.send(Task::LoadDirect { conversation: id });
+            }
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_send_direct({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |text| {
+            let Some(app) = weak.upgrade() else { return };
+            let content = text.trim().to_string();
+            if content.is_empty() {
+                return;
+            }
+            let mut state_ref = state.borrow_mut();
+            let conversation = state_ref.store.selected_conversation.clone();
+            if conversation.is_empty() {
+                return;
+            }
+            let temp_id = state_ref.temp_id();
+            let me = state_ref.store.me.member.id.clone();
+
+            state_ref.store.upsert_direct(DirectMessage {
+                id: temp_id.clone(),
+                conversation_id: conversation.clone(),
+                author_id: me,
+                content: content.clone(),
+                created_at: time::OffsetDateTime::now_utc()
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_default(),
+                pending: true,
+                failed: false,
+            });
+            state_ref.scroll_token += 1;
+            drop(state_ref);
+
+            app.set_direct_draft(SharedString::new());
+            let _ = tasks.send(Task::SendDirect {
+                conversation,
+                temp_id,
+                content,
+            });
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_message_member({
+        let tasks = tasks.clone();
+        move |id| {
+            if id.is_empty() {
+                return;
+            }
+            // The server creates the conversation if there is not one yet.
+            let _ = tasks.send(Task::OpenConversation {
+                peer: id.to_string(),
+            });
+        }
+    });
+
+    app.on_start_call({
+        move || {
+            eprintln!("minichat: direct calls need the voice feature");
         }
     });
 
@@ -2204,11 +2559,13 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                     }
                     refresh(&app, &state, &tasks);
                 }
-                ("profile", Some(MenuTarget::Member(id)))
-                | ("dm", Some(MenuTarget::Member(id))) => {
+                ("profile", Some(MenuTarget::Member(id))) => {
                     state.borrow_mut().profile = Some(id);
                     refresh(&app, &state, &tasks);
                     app.set_overlay(ui::Overlay::Profile);
+                }
+                ("dm", Some(MenuTarget::Member(id))) => {
+                    let _ = tasks.send(Task::OpenConversation { peer: id });
                 }
                 ("reply", Some(MenuTarget::Message(id))) => {
                     state.borrow_mut().replying_to = Some(id);
@@ -2271,13 +2628,6 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                 }
                 _ => {}
             }
-        }
-    });
-
-    app.on_message_member({
-        move |_id| {
-            // The direct-message inbox is not built yet.
-            eprintln!("minichat: direct messages are not available in this client yet");
         }
     });
 

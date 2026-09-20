@@ -51,6 +51,13 @@ pub struct Store {
     pub typing: HashMap<String, Vec<(String, i64)>>,
     pub collapsed_categories: Vec<String>,
 
+    // --- direct messages -------------------------------------------------
+    pub conversations: Vec<Conversation>,
+    /// Per-conversation history, capped the same way channels are.
+    pub direct: HashMap<String, Vec<DirectMessage>>,
+    pub selected_conversation: String,
+    pub inbox_open: bool,
+
     pub selected_channel: String,
     pub voice_enabled: bool,
     pub livekit_url: String,
@@ -239,6 +246,80 @@ impl Store {
         self.unread.values().sum()
     }
 
+    // --- direct messages ----------------------------------------------
+
+    pub fn conversation(&self, id: &str) -> Option<&Conversation> {
+        self.conversations.iter().find(|c| c.id == id)
+    }
+
+    /// The member on the other end of a conversation.
+    pub fn peer(&self, conversation: &str) -> Option<&Member> {
+        let peer_id = &self.conversation(conversation)?.peer_id;
+        self.member(peer_id)
+    }
+
+    pub fn direct_in(&self, conversation: &str) -> &[DirectMessage] {
+        self.direct
+            .get(conversation)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    pub fn set_direct(&mut self, conversation: &str, mut messages: Vec<DirectMessage>) {
+        messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        if messages.len() > MAX_MESSAGES_PER_CHANNEL {
+            let excess = messages.len() - MAX_MESSAGES_PER_CHANNEL;
+            messages.drain(..excess);
+        }
+        self.direct.insert(conversation.to_string(), messages);
+    }
+
+    pub fn upsert_direct(&mut self, message: DirectMessage) {
+        let conversation = message.conversation_id.clone();
+        let list = self.direct.entry(conversation).or_default();
+        match list.iter_mut().find(|m| m.id == message.id) {
+            Some(existing) => *existing = message,
+            None => {
+                list.push(message);
+                if list.len() > MAX_MESSAGES_PER_CHANNEL {
+                    let excess = list.len() - MAX_MESSAGES_PER_CHANNEL;
+                    list.drain(..excess);
+                }
+            }
+        }
+    }
+
+    /// Replace an optimistic direct message with the stored one, with the
+    /// same duplicate guard the channel path has.
+    pub fn confirm_direct(&mut self, conversation: &str, temp_id: &str, saved: DirectMessage) {
+        let list = self.direct.entry(conversation.to_string()).or_default();
+        let already_present = list.iter().any(|m| m.id == saved.id);
+        list.retain(|m| m.id != temp_id);
+        if !already_present {
+            list.push(saved);
+        }
+    }
+
+    pub fn fail_direct(&mut self, conversation: &str, temp_id: &str) {
+        if let Some(list) = self.direct.get_mut(conversation) {
+            if let Some(message) = list.iter_mut().find(|m| m.id == temp_id) {
+                message.pending = false;
+                message.failed = true;
+            }
+        }
+    }
+
+    /// Total unread across every conversation, for the sidebar's badge.
+    pub fn direct_unread(&self) -> i64 {
+        self.conversations.iter().map(|c| c.unread).sum()
+    }
+
+    pub fn mark_conversation_read(&mut self, conversation: &str) {
+        if let Some(entry) = self.conversations.iter_mut().find(|c| c.id == conversation) {
+            entry.unread = 0;
+        }
+    }
+
     pub fn toggle_category(&mut self, id: &str) {
         match self.collapsed_categories.iter().position(|c| c == id) {
             Some(index) => {
@@ -336,6 +417,54 @@ impl Store {
                 if channel != self.selected_channel {
                     *self.mentions.entry(channel).or_insert(0) += 1;
                 }
+                true
+            }
+
+            "DIRECT_MESSAGE" => {
+                let Some(message) = decode::<DirectMessage>(data) else {
+                    return false;
+                };
+                let conversation = message.conversation_id.clone();
+                let mine = message.author_id == self.me.member.id;
+
+                // A conversation the client has not seen before arrives with
+                // its first message; record it so the inbox lists it without
+                // waiting for a refetch.
+                if self.conversation(&conversation).is_none() {
+                    self.conversations.push(Conversation {
+                        id: conversation.clone(),
+                        peer_id: if mine {
+                            String::new()
+                        } else {
+                            message.author_id.clone()
+                        },
+                        last_content: Some(message.content.clone()),
+                        unread: 0,
+                    });
+                }
+
+                let reading_it = self.inbox_open && self.selected_conversation == conversation;
+                if let Some(entry) = self.conversations.iter_mut().find(|c| c.id == conversation) {
+                    entry.last_content = Some(message.content.clone());
+                    if !mine && !reading_it {
+                        entry.unread += 1;
+                    }
+                }
+
+                self.upsert_direct(message);
+                true
+            }
+
+            "DIRECT_READ" => {
+                let conversation = data["conversation_id"].as_str().unwrap_or_default();
+                self.mark_conversation_read(conversation);
+                true
+            }
+
+            "RELATIONSHIPS_STALE" => {
+                // The server is telling the client its friends list is out of
+                // date. Refetching is the caller's job; this only reports
+                // that something changed.
                 true
             }
 
@@ -822,6 +951,83 @@ mod tests {
         // Caught up: nothing is marked.
         store.mark_read("general");
         assert_eq!(store.first_unread("general"), None);
+    }
+
+    #[test]
+    fn a_direct_message_lands_and_counts_as_unread_unless_it_is_open() {
+        let mut store = store_with_me("me");
+        let arrive = |id: &str, author: &str| {
+            frame(
+                "DIRECT_MESSAGE",
+                json!({
+                    "id": id,
+                    "conversation_id": "c1",
+                    "author_id": author,
+                    "content": "hello",
+                    "created_at": "2026-03-04 10:00:00"
+                }),
+            )
+        };
+
+        // The inbox is closed, so it counts.
+        assert!(store.apply_event(&arrive("1", "ada"), 0));
+        assert_eq!(store.direct_in("c1").len(), 1);
+        assert_eq!(store.direct_unread(), 1);
+        // The conversation was learned from the message itself.
+        assert_eq!(
+            store.conversation("c1").map(|c| c.peer_id.as_str()),
+            Some("ada")
+        );
+
+        // Reading that conversation, it does not.
+        store.inbox_open = true;
+        store.selected_conversation = "c1".into();
+        store.apply_event(&arrive("2", "ada"), 0);
+        assert_eq!(store.direct_unread(), 1);
+
+        // My own never counts.
+        store.inbox_open = false;
+        store.apply_event(&arrive("3", "me"), 0);
+        assert_eq!(store.direct_unread(), 1);
+    }
+
+    #[test]
+    fn a_read_receipt_clears_the_conversations_badge() {
+        let mut store = store_with_me("me");
+        store.conversations = vec![Conversation {
+            id: "c1".into(),
+            unread: 4,
+            ..Default::default()
+        }];
+        assert_eq!(store.direct_unread(), 4);
+        store.apply_event(&frame("DIRECT_READ", json!({ "conversation_id": "c1" })), 0);
+        assert_eq!(store.direct_unread(), 0);
+    }
+
+    #[test]
+    fn an_optimistic_direct_message_does_not_duplicate_either() {
+        let mut store = store_with_me("me");
+        store.upsert_direct(DirectMessage {
+            id: "pending-1".into(),
+            conversation_id: "c1".into(),
+            pending: true,
+            ..Default::default()
+        });
+        store.upsert_direct(DirectMessage {
+            id: "real-1".into(),
+            conversation_id: "c1".into(),
+            ..Default::default()
+        });
+        store.confirm_direct(
+            "c1",
+            "pending-1",
+            DirectMessage {
+                id: "real-1".into(),
+                conversation_id: "c1".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(store.direct_in("c1").len(), 1);
     }
 
     #[test]

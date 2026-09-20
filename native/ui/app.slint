@@ -10,6 +10,7 @@ import { ConnectScreen } from "connect.slint";
 import { Sidebar } from "sidebar.slint";
 import { ChatPane } from "chat.slint";
 import { MemberPanel } from "members.slint";
+import { Inbox } from "inbox.slint";
 import { Button, ButtonKind, TextField, FieldLabel, Avatar } from "controls.slint";
 import { Icon, Icons } from "icons.slint";
 import { SettingsDialog, ProfileDialog, ConfirmDialog } from "modals.slint";
@@ -232,7 +233,25 @@ export component App inherits Window {
     in property <string> typing-line;
     in-out property <string> draft;
     in property <int> direct-unread;
+    /// Every unread message, across channels and conversations.
+    in property <int> total-unread;
     in property <bool> inbox-open;
+    in property <[ConversationRow]> conversations;
+    in property <string> selected-conversation;
+    in property <[MessageRow]> direct-messages;
+    in property <string> peer-name;
+    in property <string> peer-presence;
+    in property <image> peer-avatar;
+    in property <color> peer-avatar-fallback;
+    in property <string> peer-initials;
+    in property <bool> loading-direct;
+    in-out property <string> direct-draft;
+    in property <bool> voice-enabled;
+
+    callback open-conversation(string);
+    callback send-direct(string);
+    callback close-inbox();
+    callback start-call();
     in property <string> connection: "ready";
 
     // --- voice ------------------------------------------------------------
@@ -342,16 +361,32 @@ export component App inherits Window {
 
     VerticalLayout {
         TitleBar {
-            title: root.screen == Screen.chat && root.channel-name != ""
-                ? root.instance-name + "  \u{2014}  #" + root.channel-name
-                : root.instance-name;
+            // The unread total leads, the way a chat client's title does, so
+            // it is readable in a taskbar with the window minimised.
+            title: (root.total-unread > 0 ? "(" + root.total-unread + ")  " : "")
+                + (root.screen == Screen.chat && root.inbox-open
+                    ? root.instance-name + "  \u{2014}  Direct messages"
+                    : root.screen == Screen.chat && root.channel-name != ""
+                        ? root.instance-name + "  \u{2014}  #" + root.channel-name
+                        : root.instance-name);
             maximised: root.maximised;
             minimise => { root.minimise(); }
             toggle-maximise => { root.toggle-maximise(); }
             close => { root.quit(); }
         }
 
+        // Each screen sits inside a Rectangle that claims the remaining
+        // height. The stretch has to be on a real element: an `if` is not
+        // one as far as the layout is concerned, so putting it there leaves
+        // the row at its children's preferred height — which for the chat
+        // pane happened to look right and for the inbox collapsed the whole
+        // window to about 300px.
+        screen := Rectangle {
+            vertical-stretch: 1;
+
         if root.screen == Screen.connect: ConnectScreen {
+            width: screen.width;
+            height: screen.height;
             address <=> root.address;
             error: root.connect-error;
             busy: root.connecting;
@@ -360,6 +395,8 @@ export component App inherits Window {
         }
 
         if root.screen == Screen.signin: SignIn {
+            width: screen.width;
+            height: screen.height;
             instance-name: root.instance-name;
             instance-initial: root.instance-initial;
             instance-icon: root.instance-icon;
@@ -376,6 +413,8 @@ export component App inherits Window {
         }
 
         if root.screen == Screen.chat: HorizontalLayout {
+            width: screen.width;
+            height: screen.height;
             spacing: 0px;
 
             Sidebar {
@@ -421,7 +460,30 @@ export component App inherits Window {
                 channel-menu(id) => { root.channel-menu(id); }
             }
 
-            ChatPane {
+            if root.inbox-open: Inbox {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                conversations: root.conversations;
+                selected: root.selected-conversation;
+                messages: root.direct-messages;
+                peer-name: root.peer-name;
+                peer-presence: root.peer-presence;
+                peer-avatar: root.peer-avatar;
+                peer-avatar-fallback: root.peer-avatar-fallback;
+                peer-initials: root.peer-initials;
+                loading: root.loading-direct;
+                draft <=> root.direct-draft;
+                voice-enabled: root.voice-enabled;
+                scroll-to-newest: root.scroll-to-newest;
+                open-conversation(id) => { root.open-conversation(id); }
+                send(text) => { root.send-direct(text); }
+                open-peer(id) => { root.open-member(id); }
+                call => { root.start-call(); }
+                back => { root.close-inbox(); }
+                body-width-changed(w) => { root.body-width-changed(w); }
+            }
+
+            if !root.inbox-open: ChatPane {
                 horizontal-stretch: 1;
                 channel-name: root.channel-name;
                 channel-topic: root.channel-topic;
@@ -459,7 +521,7 @@ export component App inherits Window {
                 scroll-to-newest: root.scroll-to-newest;
             }
 
-            if root.side-panel != SidePanelKind.none: SidePanel {
+            if root.side-panel != SidePanelKind.none && !root.inbox-open: SidePanel {
                 title: root.side-panel == SidePanelKind.search ? "Search" : "Pinned messages";
                 icon: root.side-panel == SidePanelKind.search ? Icons.search : Icons.pin;
                 searchable: root.side-panel == SidePanelKind.search;
@@ -474,12 +536,15 @@ export component App inherits Window {
                 open-hit(id) => { root.open-hit(id); }
             }
 
-            if root.members-open && root.side-panel == SidePanelKind.none: MemberPanel {
+            if root.members-open && root.side-panel == SidePanelKind.none
+                && !root.inbox-open: MemberPanel {
                 groups: root.member-groups;
                 total: root.member-count;
                 open-member(id) => { root.open-member(id); }
                 member-menu(id) => { root.member-menu(id); }
             }
+        }
+
         }
     }
 
