@@ -78,6 +78,61 @@ jobs:
       # checks what the hook was supposed to write, and uninstalls again.
       # Everything here happens on the runner's own user account, per-user
       # and without elevation, which is how the installer is configured.
+      # Two things the generated script has to have: our hooks file, and the
+      # macro from it inserted where Tauri calls it. A bundle that quietly
+      # dropped the hook would otherwise look exactly like a hook that ran
+      # and did nothing.
+      - name: Check the hook reached the generated installer
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          $script = "target/release/nsis/x64/installer.nsi"
+          if (-not (Test-Path $script)) { throw "no generated script at $script" }
+          $text = Get-Content $script -Raw
+          if ($text -notmatch 'installer\\hooks\.nsh') {
+              throw "the generated script does not include desktop/installer/hooks.nsh"
+          }
+          if ($text -notmatch 'insertmacro NSIS_HOOK_POSTINSTALL') {
+              throw "the generated script never inserts NSIS_HOOK_POSTINSTALL"
+          }
+          Select-String -Path $script -Pattern 'hooks\.nsh', 'NSIS_HOOK_POSTINSTALL' |
+              ForEach-Object { Write-Host "$($_.LineNumber): $($_.Line.Trim())" }
+
+      # The hook on its own, away from the app: same includes, same execution
+      # level, same shell context, nothing else. When this passes and the
+      # real installer below does not, the difference is Tauri's script, not
+      # the hook.
+      - name: Run the hook in isolation
+        shell: pwsh
+        working-directory: desktop/installer
+        run: |
+          $makensis = Get-ChildItem "$env:LOCALAPPDATA\tauri" -Recurse -Filter makensis.exe `
+              -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $makensis) { throw "no makensis under $env:LOCALAPPDATA\tauri" }
+          Write-Host "using $($makensis.FullName)"
+
+          & $makensis.FullName /V2 hooks-test.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with $LASTEXITCODE" }
+
+          $instance = 'https://hook-test.example.com'
+          $run = Start-Process -FilePath (Resolve-Path ./hooks-test.exe) `
+              -ArgumentList '/S', "/INSTANCE=$instance" -Wait -PassThru
+          Write-Host "hook test exited with $($run.ExitCode)"
+
+          $settings = "$env:APPDATA\chat.mini.desktop\settings.json"
+          for ($i = 0; $i -lt 15 -and -not (Test-Path $settings); $i++) { Start-Sleep 1 }
+          if (-not (Test-Path $settings)) {
+              throw "the hook alone did not write $settings"
+          }
+          Get-Content $settings -Raw | Write-Host
+          $saved = (Get-Content $settings -Raw | ConvertFrom-Json).instance_url
+          if ($saved -ne $instance) { throw "hook wrote '$saved', expected '$instance'" }
+
+          # Out of the way of the real installer below, which deliberately
+          # leaves existing settings alone.
+          Remove-Item "$env:APPDATA\chat.mini.desktop" -Recurse -Force
+          Remove-Item ./hooks-test.exe -Force
+
       - name: Install, and check the installer's hooks
         shell: pwsh
         working-directory: desktop
@@ -123,7 +178,7 @@ jobs:
 
           if (-not (Test-Path $settings)) {
               # Where the hook's own idea of %APPDATA% ended up, if anywhere.
-              foreach ($root in $env:APPDATA, $env:LOCALAPPDATA, $env:PROGRAMDATA) {
+              foreach ($root in $env:APPDATA, $env:LOCALAPPDATA, $env:PROGRAMDATA, "C:") {
                   Show-Tree "chat.mini.desktop" "$root\chat.mini.desktop"
               }
               throw "the /INSTANCE hook did not write $settings"
