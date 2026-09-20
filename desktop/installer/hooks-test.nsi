@@ -37,5 +37,19 @@ FunctionEnd
 
 Section Install
   SetOutPath $INSTDIR
+
+  ; What the hook has to work with, written out so a failure in CI says what
+  ; the installer was actually handed rather than only that nothing happened.
+  ${GetParameters} $0
+  FileOpen $9 "$INSTDIR\parameters.txt" w
+  FileWrite $9 "parameters: [$0]$\r$\n"
+  FileWrite $9 "appdata: [$APPDATA]$\r$\n"
+  FileClose $9
+
   !insertmacro NSIS_HOOK_POSTINSTALL
+
+  ; And what it made of it.
+  FileOpen $9 "$INSTDIR\parsed.txt" w
+  FileWrite $9 "url: [$MinichatUrl]$\r$\n"
+  FileClose $9
 SectionEnd

@@ -37,34 +37,87 @@ Var MinichatFile
   ; The app re-validates whatever it reads, so the worst a bad value can do
   ; is send someone to the connect screen they would have seen anyway.
   ${GetParameters} $MinichatArgs
-  ${GetOptions} $MinichatArgs "/INSTANCE=" $MinichatUrl
-  ${IfNot} ${Errors}
-  ${AndIf} $MinichatUrl != ""
+  Call ReadInstanceOption
+  ${If} $MinichatUrl != ""
     ${If} ${FileExists} "${MINICHAT_CONFIG}\settings.json"
       ; Reinstalling over an existing install, or installing beside settings
       ; someone already has. What they chose wins over the command line.
       DetailPrint "MiniChat: keeping the instance address already configured"
     ${Else}
-      Call CheckInstanceUrl
-      ${If} $MinichatUrl == ""
-        DetailPrint "MiniChat: ignoring /INSTANCE (http:// or https:// only)"
+      CreateDirectory "${MINICHAT_CONFIG}"
+      ClearErrors
+      FileOpen $MinichatFile "${MINICHAT_CONFIG}\settings.json" w
+      ${If} ${Errors}
+        DetailPrint "MiniChat: could not write the instance address"
       ${Else}
-        CreateDirectory "${MINICHAT_CONFIG}"
-        ClearErrors
-        FileOpen $MinichatFile "${MINICHAT_CONFIG}\settings.json" w
-        ${If} ${Errors}
-          DetailPrint "MiniChat: could not write the instance address"
-        ${Else}
-          ; Only the address. Every other setting has a default in the app,
-          ; and writing them here would be a second place to keep correct.
-          FileWrite $MinichatFile '{$\r$\n  "instance_url": "$MinichatUrl"$\r$\n}$\r$\n'
-          FileClose $MinichatFile
-          DetailPrint "MiniChat: first launch will connect to $MinichatUrl"
-        ${EndIf}
+        ; Only the address. Every other setting has a default in the app,
+        ; and writing them here would be a second place to keep correct.
+        FileWrite $MinichatFile '{$\r$\n  "instance_url": "$MinichatUrl"$\r$\n}$\r$\n'
+        FileClose $MinichatFile
+        DetailPrint "MiniChat: first launch will connect to $MinichatUrl"
       ${EndIf}
     ${EndIf}
   ${EndIf}
 !macroend
+
+; Read /INSTANCE=<url> off the command line into $MinichatUrl, empty when it
+; is absent or not something to hand the app.
+;
+; Not `${GetOptions}`, which is the obvious way to do this and is wrong here:
+; it ends a value at the next switch character, and the switch character is
+; "/", so it reads `/INSTANCE=https://chat.example.com` as `https:` and hands
+; that back without an error. Every URL anyone would pass contains "//".
+;
+; A URL cannot contain a space, so the value runs to the next space or to the
+; end of the line. A quoted value runs to its closing quote, because that is
+; what someone who quoted it meant.
+Function ReadInstanceOption
+  StrCpy $MinichatUrl ""
+
+  ; Find the switch. String comparison in NSIS ignores case, so /instance=
+  ; works as well, which is what anyone typing it at a prompt will do.
+  StrLen $MinichatLength $MinichatArgs
+  StrCpy $MinichatIndex 0
+  ${Do}
+    ${If} $MinichatIndex >= $MinichatLength
+      Return
+    ${EndIf}
+    StrCpy $MinichatScratch $MinichatArgs 10 $MinichatIndex
+    ${If} $MinichatScratch == "/INSTANCE="
+      ${ExitDo}
+    ${EndIf}
+    IntOp $MinichatIndex $MinichatIndex + 1
+  ${Loop}
+
+  ; Everything after it, for now.
+  IntOp $MinichatIndex $MinichatIndex + 10
+  StrCpy $MinichatUrl $MinichatArgs "" $MinichatIndex
+
+  ; Then cut it short at whatever ends the value.
+  StrCpy $MinichatChar $MinichatUrl 1
+  ${If} $MinichatChar == '"'
+    StrCpy $MinichatUrl $MinichatUrl "" 1
+    StrCpy $MinichatScratch '"'
+  ${Else}
+    StrCpy $MinichatScratch " "
+  ${EndIf}
+
+  StrLen $MinichatLength $MinichatUrl
+  StrCpy $MinichatIndex 0
+  ${Do}
+    ${If} $MinichatIndex >= $MinichatLength
+      ${ExitDo}
+    ${EndIf}
+    StrCpy $MinichatChar $MinichatUrl 1 $MinichatIndex
+    ${If} $MinichatChar == $MinichatScratch
+      StrCpy $MinichatUrl $MinichatUrl $MinichatIndex
+      ${ExitDo}
+    ${EndIf}
+    IntOp $MinichatIndex $MinichatIndex + 1
+  ${Loop}
+
+  Call CheckInstanceUrl
+FunctionEnd
 
 ; Empty $MinichatUrl unless it is an http(s) address with nothing in it that
 ; would need escaping to sit inside JSON.
@@ -78,6 +131,7 @@ Function CheckInstanceUrl
   ${If} $MinichatScratch != "http://"
     StrCpy $MinichatScratch $MinichatUrl 8
     ${If} $MinichatScratch != "https://"
+      DetailPrint "MiniChat: ignoring /INSTANCE (http:// or https:// only)"
       StrCpy $MinichatUrl ""
       Return
     ${EndIf}
@@ -93,6 +147,7 @@ Function CheckInstanceUrl
     ${If} $MinichatChar == '"'
     ; NSIS has no escape for a backslash: it is not a special character.
     ${OrIf} $MinichatChar == "\"
+      DetailPrint "MiniChat: ignoring /INSTANCE (unusable characters)"
       StrCpy $MinichatUrl ""
       ${ExitDo}
     ${EndIf}

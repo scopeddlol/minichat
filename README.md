@@ -203,7 +203,8 @@ on the command line and writes it where the app looks:
 MiniChat_0.5.0_x64-setup.exe /S /INSTANCE=https://chat.example.com
 ```
 
-`/S` is NSIS's silent flag; drop it to watch the installer run. The address is
+`/S` is NSIS's silent flag; drop it to watch the installer run. Quotes around
+the address are optional. The address is
 only written when there are no settings already — a reinstall never overrides
 what someone chose — and the app re-validates it on startup, so a bad value
 costs a trip to the connect screen and nothing more. The installer is per-user

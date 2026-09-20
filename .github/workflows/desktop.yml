@@ -119,6 +119,13 @@ jobs:
               -ArgumentList '/S', "/INSTANCE=$instance" -Wait -PassThru
           Write-Host "hook test exited with $($run.ExitCode)"
 
+          # What the harness recorded on the way through, which is the only
+          # window into a silent NSIS run.
+          foreach ($note in 'parameters.txt', 'parsed.txt') {
+              $path = "$env:TEMP\minichat-hook-test\$note"
+              if (Test-Path $path) { Get-Content $path | ForEach-Object { Write-Host $_ } }
+          }
+
           $settings = "$env:APPDATA\chat.mini.desktop\settings.json"
           for ($i = 0; $i -lt 15 -and -not (Test-Path $settings); $i++) { Start-Sleep 1 }
           if (-not (Test-Path $settings)) {
@@ -131,6 +138,7 @@ jobs:
           # Out of the way of the real installer below, which deliberately
           # leaves existing settings alone.
           Remove-Item "$env:APPDATA\chat.mini.desktop" -Recurse -Force
+          Remove-Item "$env:TEMP\minichat-hook-test" -Recurse -Force
           Remove-Item ./hooks-test.exe -Force
 
       - name: Install, and check the installer's hooks
