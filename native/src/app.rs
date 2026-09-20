@@ -70,6 +70,8 @@ enum Task {
         max_mb: i64,
     },
     FetchImages(Vec<String>),
+    /// The same image again, at lightbox resolution.
+    FetchFullImage(String),
     Search {
         query: String,
     },
@@ -82,6 +84,8 @@ enum Task {
         channel: String,
     },
     LoadConversations,
+    ReorderChannels(Vec<crate::reorder::Placement>),
+    ReorderCategories(Vec<(String, i64)>),
     OpenConversation {
         peer: String,
     },
@@ -137,6 +141,11 @@ enum Event {
         max_side: u32,
     },
     ImageFailed(String),
+    FullImageLoaded {
+        url: String,
+        bytes: Vec<u8>,
+    },
+    FullImageFailed(String),
     SearchResults(Vec<Message>),
     Pins(Vec<Message>),
     OlderMessages {
@@ -156,6 +165,7 @@ enum Event {
         files: Vec<Attachment>,
     },
     AttachFailed(String),
+    Reordered,
     Conversations(Vec<Conversation>),
     ConversationOpened(Box<Conversation>),
     DirectHistory {
@@ -201,6 +211,18 @@ struct AppState {
     pending_attachments: Vec<Attachment>,
     /// Why the last attachment did not upload.
     attach_notice: String,
+    /// The channel the pointer went down on, which becomes the dragged one
+    /// once the pointer has moved far enough to mean it.
+    pressed_channel: Option<String>,
+    /// The channel being dragged, and how far it has moved.
+    dragging: Option<String>,
+    drag_offset: f32,
+    /// The attachment open in the lightbox.
+    lightbox: Option<Attachment>,
+    /// The message being forwarded, and where to.
+    forwarding: Option<Message>,
+    forward_target: String,
+    forward_busy: bool,
     /// The message being edited in place, and the text so far.
     editing: Option<String>,
     /// The message a reaction is being picked for, if the picker was opened
@@ -216,6 +238,9 @@ struct AppState {
     scroll_token: i32,
     /// Bumped to put the caret back in the composer.
     focus_token: i32,
+    /// The instance origin, for turning a relative upload URL into one the
+    /// desktop can open.
+    origin: String,
     /// A page of older messages is in flight.
     loading_older: bool,
     /// Channels known to have nothing older left, so scrolling to the top
@@ -260,6 +285,7 @@ enum Confirm {
 enum MenuTarget {
     Message(String),
     Channel(String),
+    Category(String),
     Member(String),
 }
 
@@ -282,12 +308,20 @@ impl AppState {
             window_focused: true,
             pending_attachments: Vec::new(),
             attach_notice: String::new(),
+            pressed_channel: None,
+            dragging: None,
+            drag_offset: 0.0,
+            lightbox: None,
+            forwarding: None,
+            forward_target: String::new(),
+            forward_busy: false,
             editing: None,
             reacting_to: None,
             menu_target: None,
             scroll_distance: 0.0,
             scroll_token: 0,
             focus_token: 0,
+            origin: String::new(),
             loading_older: false,
             exhausted: Vec::new(),
             content_height: 0.0,
@@ -313,6 +347,18 @@ impl AppState {
     /// what the last refresh knew the content height to be.
     fn scroll_distance_at_top(&self, distance: f32) -> bool {
         distance >= self.content_height - self.viewport_height - PREFETCH_WITHIN
+    }
+
+    /// An upload URL the desktop can open. Uploads come through relative.
+    fn origin_url(&self, url: &str) -> String {
+        if url.starts_with("http://") || url.starts_with("https://") {
+            return url.to_string();
+        }
+        format!(
+            "{}/{}",
+            self.origin.trim_end_matches('/'),
+            url.trim_start_matches('/')
+        )
     }
 
     fn temp_id(&mut self) -> String {
@@ -438,6 +484,9 @@ pub fn run(settings: Settings) -> Result<(), Box<dyn std::error::Error>> {
         drop(state_ref);
 
         theme::apply(&app, &state.borrow().palette);
+        if let Some(origin) = state.borrow().settings.instance_url.clone() {
+            state.borrow_mut().origin = origin;
+        }
         match (saved, token) {
             (Some(origin), Some(token)) => {
                 app.set_instance_name("MiniChat".into());
@@ -692,6 +741,18 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 });
             }
 
+            Task::FetchFullImage(url) => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let _ = match client.fetch_bytes(&url, images::MAX_BYTES).await {
+                        Ok(bytes) => events.send(Event::FullImageLoaded { url, bytes }),
+                        Err(_) => events.send(Event::FullImageFailed(url)),
+                    };
+                });
+            }
+
             Task::Search { query } => {
                 let (Some(client), events) = (client.clone(), events.clone()) else {
                     continue;
@@ -736,6 +797,33 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                             error: error.to_string(),
                         }),
                     };
+                });
+            }
+
+            Task::ReorderChannels(order) => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    // The gateway echoes CHANNEL_UPDATE for each move, so the
+                    // store is brought up to date by the same path as anyone
+                    // else's reorder. This only reports that it landed.
+                    if client.reorder_channels(&order).await.is_ok() {
+                        let _ = events.send(Event::Reordered);
+                    }
+                });
+            }
+
+            Task::ReorderCategories(order) => {
+                let Some(client) = client.clone() else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    for (id, position) in order {
+                        let _ = client
+                            .update_category(&id, serde_json::json!({ "position": position }))
+                            .await;
+                    }
                 });
             }
 
@@ -896,6 +984,7 @@ fn handle_event(
             let mut state = state.borrow_mut();
             state.settings.token = Some(token.clone());
             let origin = state.settings.instance_url.clone().unwrap_or_default();
+            state.origin = origin.clone();
             if let Err(error) = state.settings.store() {
                 eprintln!("minichat: {error}");
             }
@@ -1101,6 +1190,16 @@ fn handle_event(
             false
         }
 
+        Event::FullImageLoaded { url, bytes } => {
+            let state = state.borrow();
+            state.images.insert_full(&url, &bytes)
+        }
+
+        Event::FullImageFailed(url) => {
+            state.borrow().images.fail_full(&url);
+            false
+        }
+
         Event::OlderMessages { channel, messages } => {
             if messages.is_empty() {
                 // Nothing older exists; stop asking.
@@ -1172,6 +1271,10 @@ fn handle_event(
             state_ref.attach_notice = error;
             true
         }
+
+        // The server accepted the move; the gateway's CHANNEL_UPDATEs carry
+        // the new positions, so there is nothing to apply here.
+        Event::Reordered => false,
 
         Event::Conversations(list) => {
             state.borrow_mut().store.conversations = list;
@@ -1813,6 +1916,38 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
         app.set_compose_notice(state_ref.attach_notice.clone().into());
     }
 
+    // --- lightbox and forwarding -------------------------------------------
+    if let Some(file) = state_ref.lightbox.as_ref() {
+        app.set_lightbox_picture(state_ref.images.get_full_or_preview(&file.url));
+        app.set_lightbox_filename(file.filename.clone().into());
+        app.set_lightbox_caption(
+            match (file.width, file.height) {
+                (Some(w), Some(h)) => {
+                    format!("{w} × {h} · {}", crate::format::bytes(file.size))
+                }
+                _ => crate::format::bytes(file.size),
+            }
+            .into(),
+        );
+    }
+
+    if let Some(message) = state_ref.forwarding.as_ref() {
+        app.set_forward_author(message.author_name().into());
+        app.set_forward_body(view::excerpt(message, 160).into());
+        app.set_forward_target(state_ref.forward_target.clone().into());
+        app.set_forwarding(state_ref.forward_busy);
+        // Only channels this member may actually post in, so the dialog
+        // cannot offer a destination the server would refuse.
+        let targets: Vec<ui::ChannelRow> = store
+            .channels
+            .iter()
+            .filter(|c| c.kind != ChannelKind::Voice)
+            .filter(|c| store.can_send_in(&c.id))
+            .map(to_channel)
+            .collect();
+        app.set_forward_targets(ModelRc::new(VecModel::from(targets)));
+    }
+
     app.set_editing_id(
         state_ref
             .editing
@@ -1824,6 +1959,18 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
     app.set_scroll_to_newest(state_ref.scroll_token);
     app.set_focus_composer(state_ref.focus_token);
     app.set_scroll_distance(state_ref.scroll_distance);
+    app.set_can_reorder(crate::perms::can(
+        store.permissions,
+        crate::perms::MANAGE_CHANNELS,
+    ));
+    app.set_dragging_channel(
+        state_ref
+            .dragging
+            .as_deref()
+            .map(SharedString::from)
+            .unwrap_or_default(),
+    );
+    app.set_drag_offset(state_ref.drag_offset);
 
     queue_images(&state_ref, tasks);
 }
@@ -1988,6 +2135,100 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
         let state = state.clone();
         move |focused| {
             state.borrow_mut().window_focused = focused;
+        }
+    });
+
+    // --- reordering ------------------------------------------------------
+    //
+    // A drag only becomes a drag past a few pixels, so an ordinary click on
+    // a channel still selects it rather than nudging it one row.
+    const DRAG_THRESHOLD: f32 = 5.0;
+    /// The height of a channel row, which is what a drag distance is
+    /// measured in. Matches `ChannelButton` in ui/sidebar.slint.
+    const ROW_HEIGHT: f32 = 38.0;
+
+    app.on_drag_start({
+        let state = state.clone();
+        move |id| {
+            // Nothing moves yet: the press might be a click. The drag begins
+            // on the first move past the threshold.
+            let mut state_ref = state.borrow_mut();
+            state_ref.pressed_channel = Some(id.to_string());
+            state_ref.drag_offset = 0.0;
+        }
+    });
+
+    app.on_drag_move({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |dy| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            if !crate::perms::can(state_ref.store.permissions, crate::perms::MANAGE_CHANNELS) {
+                return;
+            }
+            if dy.abs() < DRAG_THRESHOLD && state_ref.dragging.is_none() {
+                return;
+            }
+            if state_ref.dragging.is_none() {
+                // The row being dragged is the one under the pointer, which
+                // is the selected one only by coincidence — so it is taken
+                // from the press rather than from the selection.
+                state_ref.dragging = state_ref.pressed_channel.clone();
+            }
+            state_ref.drag_offset = dy;
+            drop(state_ref);
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_drag_end({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let Some(id) = state_ref.dragging.take() else {
+                state_ref.drag_offset = 0.0;
+                return;
+            };
+            let offset = crate::reorder::rows_moved(state_ref.drag_offset, ROW_HEIGHT);
+            state_ref.drag_offset = 0.0;
+
+            let order = crate::reorder::move_channel(
+                &state_ref.store.channels,
+                &state_ref.store.categories,
+                &id,
+                offset,
+            );
+            drop(state_ref);
+
+            if let Some(order) = order {
+                let _ = tasks.send(Task::ReorderChannels(order));
+            }
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_category_menu({
+        let weak = app.as_weak();
+        let state = state.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            if !crate::perms::can(state_ref.store.permissions, crate::perms::MANAGE_CHANNELS) {
+                return;
+            }
+            state_ref.menu_target = Some(MenuTarget::Category(id.to_string()));
+            drop(state_ref);
+
+            app.set_menu_items(ModelRc::new(VecModel::from(vec![
+                menu_item("category-up", "Move up", "", false, false),
+                menu_item("category-down", "Move down", "", false, false),
+            ])));
+            app.set_overlay(ui::Overlay::Menu);
         }
     });
 
@@ -2434,6 +2675,140 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
         }
     });
 
+    app.on_open_attachment({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let channel = state_ref.store.selected_channel.clone();
+            let file = state_ref
+                .store
+                .messages_in(&channel)
+                .iter()
+                .flat_map(|m| m.attachments.iter())
+                .find(|f| f.id == id.as_str())
+                .cloned();
+            let Some(file) = file else { return };
+
+            // An image opens in place; anything else is handed to the
+            // desktop, which knows what to do with a PDF or a zip and this
+            // client does not.
+            if !file.is_image() {
+                let url = state_ref.origin_url(&file.url);
+                drop(state_ref);
+                open_externally(&url);
+                return;
+            }
+
+            // The preview in the message list is scaled down, so the full
+            // image is fetched before it is shown at full size.
+            let url = file.url.clone();
+            let fetch = state_ref.images.claim_full(&url);
+            state_ref.lightbox = Some(file);
+            drop(state_ref);
+
+            if fetch {
+                let _ = tasks.send(Task::FetchFullImage(url));
+            }
+            refresh(&app, &state, &tasks);
+            app.set_overlay(ui::Overlay::Lightbox);
+        }
+    });
+
+    app.on_lightbox_download({
+        let state = state.clone();
+        move || {
+            let state_ref = state.borrow();
+            if let Some(file) = state_ref.lightbox.as_ref() {
+                let url = state_ref.origin_url(&file.url);
+                drop(state_ref);
+                open_externally(&url);
+            }
+        }
+    });
+
+    // --- forwarding ------------------------------------------------------
+    app.on_forward_message({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let mut state_ref = state.borrow_mut();
+            let channel = state_ref.store.selected_channel.clone();
+            let message = state_ref
+                .store
+                .messages_in(&channel)
+                .iter()
+                .find(|m| m.id == id.as_str())
+                .cloned();
+            let Some(message) = message else { return };
+            state_ref.forwarding = Some(message);
+            state_ref.forward_target.clear();
+            state_ref.forward_busy = false;
+            drop(state_ref);
+
+            app.set_forward_note(SharedString::new());
+            refresh(&app, &state, &tasks);
+            app.set_overlay(ui::Overlay::Forward);
+        }
+    });
+
+    app.on_choose_forward_target({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().forward_target = id.to_string();
+            refresh(&app, &state, &tasks);
+        }
+    });
+
+    app.on_confirm_forward({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let note = app.get_forward_note().trim().to_string();
+            let mut state_ref = state.borrow_mut();
+            let target = state_ref.forward_target.clone();
+            let Some(message) = state_ref.forwarding.clone() else {
+                return;
+            };
+            if target.is_empty() {
+                return;
+            }
+            let origin = state_ref
+                .store
+                .channel(&message.channel_id)
+                .map(|c| c.name.clone());
+            let public = state_ref.store.instance_public_url();
+            let body = crate::forward::compose(&message, origin.as_deref(), &note, &public);
+            state_ref.forward_busy = true;
+            let temp_id = state_ref.temp_id();
+            drop(state_ref);
+
+            let _ = tasks.send(Task::Send {
+                channel: target.clone(),
+                temp_id,
+                content: body,
+                reply_to: None,
+                attachments: Vec::new(),
+            });
+
+            // Follow the forward to where it landed, the way the web client
+            // does: you nearly always want to see it arrive.
+            app.set_overlay(ui::Overlay::None);
+            state.borrow_mut().forwarding = None;
+            app.invoke_select_channel(target.into());
+            refresh(&app, &state, &tasks);
+        }
+    });
+
     app.on_remove_attachment({
         let weak = app.as_weak();
         let state = state.clone();
@@ -2616,6 +2991,8 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             state_ref.pending_confirm = None;
             state_ref.reacting_to = None;
             state_ref.menu_target = None;
+            state_ref.lightbox = None;
+            state_ref.forwarding = None;
             state_ref.focus_token += 1;
             drop(state_ref);
             app.set_overlay(ui::Overlay::None);
@@ -2980,6 +3357,19 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             app.set_overlay(ui::Overlay::None);
 
             match (choice.as_str(), target) {
+                ("category-up", Some(MenuTarget::Category(id)))
+                | ("category-down", Some(MenuTarget::Category(id))) => {
+                    let offset = if choice == "category-up" { -1 } else { 1 };
+                    let order = crate::reorder::move_category(
+                        &state.borrow().store.categories,
+                        &id,
+                        offset,
+                    );
+                    if let Some(order) = order {
+                        let _ = tasks.send(Task::ReorderCategories(order));
+                    }
+                }
+
                 ("mark-read", Some(MenuTarget::Channel(id))) => {
                     let mut state_ref = state.borrow_mut();
                     let last = state_ref

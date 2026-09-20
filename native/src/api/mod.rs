@@ -652,6 +652,174 @@ fn mime_for(path: &std::path::Path) -> &'static str {
     }
 }
 
+impl Client {
+    // --- relationships ---------------------------------------------------
+
+    /// Send a friend request, or accept one already pointing at me — the
+    /// server treats them as the same call.
+    pub async fn add_friend(&self, user: &str) -> Result<serde_json::Value> {
+        self.post("/relationships", json!({ "user_id": user }))
+            .await
+    }
+
+    /// Withdraw, decline or unfriend. Also one call on the server.
+    pub async fn remove_friend(&self, user: &str) -> Result<serde_json::Value> {
+        self.delete(&format!("/relationships/{}", encode(user)))
+            .await
+    }
+
+    pub async fn block_user(&self, user: &str) -> Result<serde_json::Value> {
+        self.post("/relationships/block", json!({ "user_id": user }))
+            .await
+    }
+
+    pub async fn unblock_user(&self, user: &str) -> Result<serde_json::Value> {
+        self.delete(&format!("/relationships/block/{}", encode(user)))
+            .await
+    }
+
+    pub async fn set_favourite(&self, user: &str, favourite: bool) -> Result<serde_json::Value> {
+        let path = format!("/favourites/{}", encode(user));
+        if favourite {
+            self.put(&path).await
+        } else {
+            self.delete(&path).await
+        }
+    }
+
+    // --- direct calls ----------------------------------------------------
+
+    pub async fn calls(&self) -> Result<Vec<DirectCall>> {
+        self.get("/direct/calls").await
+    }
+
+    pub async fn start_call(&self, conversation: &str) -> Result<DirectCall> {
+        self.post_empty(&format!("/direct/{}/call", encode(conversation)))
+            .await
+    }
+
+    /// `accept` or `end`. Declining and hanging up are both `end`.
+    pub async fn call_action(&self, call: &str, action: &str) -> Result<DirectCall> {
+        self.post(
+            &format!("/direct/calls/{}", encode(call)),
+            json!({ "action": action }),
+        )
+        .await
+    }
+
+    // --- channels --------------------------------------------------------
+
+    /// Save a new channel order. Positions are the full list, not a delta,
+    /// so the server never has to reconcile a partial move.
+    pub async fn reorder_channels(
+        &self,
+        order: &[(String, i64, Option<String>)],
+    ) -> Result<serde_json::Value> {
+        let channels: Vec<serde_json::Value> = order
+            .iter()
+            .map(|(id, position, category)| {
+                json!({ "id": id, "position": position, "category_id": category })
+            })
+            .collect();
+        self.post("/channels/reorder", json!({ "channels": channels }))
+            .await
+    }
+
+    // --- administration ---------------------------------------------------
+
+    pub async fn stats(&self) -> Result<Stats> {
+        self.get("/admin/stats").await
+    }
+
+    pub async fn admin_instance(&self) -> Result<Instance> {
+        self.get("/admin/instance").await
+    }
+
+    pub async fn update_instance(&self, payload: serde_json::Value) -> Result<Instance> {
+        self.patch("/admin/instance", payload).await
+    }
+
+    pub async fn roles(&self) -> Result<Vec<Role>> {
+        self.get("/admin/roles").await
+    }
+
+    pub async fn bans(&self) -> Result<Vec<BanEntry>> {
+        self.get("/admin/bans").await
+    }
+
+    pub async fn ban_member(&self, user: &str, reason: &str) -> Result<serde_json::Value> {
+        self.send(
+            Method::PUT,
+            &format!("/admin/bans/{}", encode(user)),
+            Some(json!({ "reason": reason })),
+        )
+        .await
+    }
+
+    pub async fn unban_member(&self, user: &str) -> Result<serde_json::Value> {
+        self.delete(&format!("/admin/bans/{}", encode(user))).await
+    }
+
+    pub async fn kick_member(&self, user: &str) -> Result<serde_json::Value> {
+        self.delete(&format!("/admin/members/{}", encode(user)))
+            .await
+    }
+
+    pub async fn set_member_role(
+        &self,
+        user: &str,
+        role: &str,
+        granted: bool,
+    ) -> Result<serde_json::Value> {
+        let path = format!("/admin/members/{}/roles/{}", encode(user), encode(role));
+        if granted {
+            self.put(&path).await
+        } else {
+            self.delete(&path).await
+        }
+    }
+
+    pub async fn invites(&self) -> Result<Vec<Invite>> {
+        self.get("/invites").await
+    }
+
+    pub async fn create_invite(
+        &self,
+        note: &str,
+        max_uses: i64,
+        expires_in_hours: i64,
+    ) -> Result<Invite> {
+        self.post(
+            "/invites",
+            json!({
+                "note": note,
+                "max_uses": max_uses,
+                "expires_in_hours": expires_in_hours,
+            }),
+        )
+        .await
+    }
+
+    pub async fn revoke_invite(&self, code: &str) -> Result<serde_json::Value> {
+        self.delete(&format!("/invites/{}", encode(code))).await
+    }
+
+    pub async fn audit(&self, before: Option<&str>) -> Result<Vec<AuditEntry>> {
+        let suffix = match before {
+            Some(before) => format!("?before={}", encode(before)),
+            None => String::new(),
+        };
+        self.get(&format!("/admin/audit{suffix}")).await
+    }
+}
+
+impl Client {
+    pub async fn update_category(&self, id: &str, payload: serde_json::Value) -> Result<Category> {
+        self.patch(&format!("/categories/{}", encode(id)), payload)
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

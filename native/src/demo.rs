@@ -403,6 +403,19 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             app.set_direct_messages(app.get_messages());
             app.set_loading_direct(false);
         }
+        "forward" => {
+            let rows = app.get_messages();
+            if let Some(row) = rows.row_data(3) {
+                app.set_forward_author(row.author_name.clone());
+            }
+            app.set_forward_body(
+                "Both. Here's the shape of it: let laid = layout(&blocks, width, &measurer);"
+                    .into(),
+            );
+            app.set_forward_targets(app.get_loose_channels());
+            app.set_forward_target("welcome".into());
+            app.set_overlay(ui::Overlay::Forward);
+        }
         "scrolled" => {
             // Scrolled back, so the jump-to-present button is in the frame.
             app.set_scroll_distance(420.0);

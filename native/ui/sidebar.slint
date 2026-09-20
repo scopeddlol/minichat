@@ -112,20 +112,40 @@ component VoiceSeat {
 component ChannelButton {
     in property <ChannelRow> channel;
     in property <bool> selected;
+    /// Whether this member may reorder channels at all.
+    in property <bool> draggable;
+    /// How far this row has been dragged, when it is the one being dragged.
+    in property <length> drag-offset;
+    in property <bool> dragging;
     callback activated();
     callback context-menu();
     callback open-member(string);
+    callback drag-started();
+    callback drag-moved(length);
+    callback drag-ended();
 
     VerticalLayout {
         spacing: 0px;
 
         // `.community-nav [data-channel-id]` — 11px/12px padding, 7px radius.
+        //
+        // The slot in the layout stays put; the visible row inside it is
+        // what follows the pointer, because a layout owns its children's y.
         Rectangle {
             height: root.channel.description == "" ? 38px : 48px;
-            background: root.selected ? Theme.surface-2
-                : touch.has-hover ? Theme.surface-1 : transparent;
-            border-radius: Theme.radius-control;
-            animate background { duration: Theme.normal; easing: ease-out; }
+
+            row := Rectangle {
+                y: root.dragging ? root.drag-offset : 0;
+                width: 100%;
+                height: 100%;
+                background: root.dragging ? Theme.surface-3
+                    : root.selected ? Theme.surface-2
+                    : touch.has-hover ? Theme.surface-1 : transparent;
+                border-radius: Theme.radius-control;
+                border-width: root.dragging ? 1px : 0;
+                border-color: Theme.accent;
+                opacity: root.dragging ? 0.92 : 1.0;
+                animate background { duration: Theme.normal; easing: ease-out; }
 
             HorizontalLayout {
                 padding-left: 12px;
@@ -191,14 +211,40 @@ component ChannelButton {
             }
 
             touch := TouchArea {
-                mouse-cursor: MouseCursor.pointer;
+                mouse-cursor: root.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+
                 pointer-event(event) => {
                     if (event.button == PointerEventButton.right
                         && event.kind == PointerEventKind.down) {
                         root.context-menu();
+                        return;
+                    }
+                    if (!root.draggable || event.button != PointerEventButton.left) {
+                        return;
+                    }
+                    if (event.kind == PointerEventKind.down) {
+                        root.drag-started();
+                    }
+                    if (event.kind == PointerEventKind.up) {
+                        root.drag-ended();
                     }
                 }
-                clicked => { root.activated(); }
+
+                // Reported while the button is held. A drag only begins past
+                // a few pixels, so an ordinary click is still a click and
+                // not a one-pixel reorder.
+                moved => {
+                    if (root.draggable && self.pressed) {
+                        root.drag-moved(self.mouse-y - self.pressed-y);
+                    }
+                }
+
+                clicked => {
+                    if (!root.dragging) {
+                        root.activated();
+                    }
+                }
+            }
             }
         }
 
@@ -274,7 +320,16 @@ export component Sidebar {
     callback open-invites();
     callback open-profile();
     callback channel-menu(string);
+    callback category-menu(string);
     callback open-member(string);
+
+    // --- reordering ------------------------------------------------------
+    in property <bool> can-reorder;
+    in property <string> dragging-channel;
+    in property <length> drag-offset;
+    callback drag-start(string);
+    callback drag-move(length);
+    callback drag-end();
     callback toggle-mute();
     callback toggle-deafen();
     callback toggle-screen-share();
@@ -350,6 +405,7 @@ export component Sidebar {
                 content-height: list.preferred-height;
 
                 list := VerticalLayout {
+                    alignment: start;
                     padding-left: 8px;
                     padding-right: 8px;
                     padding-top: 12px;
@@ -404,9 +460,15 @@ export component Sidebar {
                     for channel in root.loose-channels: ChannelButton {
                         channel: channel;
                         selected: channel.id == root.selected-channel && !root.inbox-open;
+                        draggable: root.can-reorder;
+                        dragging: root.dragging-channel == channel.id;
+                        drag-offset: root.drag-offset;
                         activated => { root.select-channel(channel.id); }
                         context-menu => { root.channel-menu(channel.id); }
                         open-member(id) => { root.open-member(id); }
+                        drag-started => { root.drag-start(channel.id); }
+                        drag-moved(dy) => { root.drag-move(dy); }
+                        drag-ended => { root.drag-end(); }
                     }
 
                     for category in root.categories: VerticalLayout {
@@ -446,6 +508,12 @@ export component Sidebar {
                             }
                             cat-touch := TouchArea {
                                 mouse-cursor: MouseCursor.pointer;
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.right
+                                        && event.kind == PointerEventKind.down) {
+                                        root.category-menu(category.id);
+                                    }
+                                }
                                 clicked => { root.toggle-category(category.id); }
                             }
                         }

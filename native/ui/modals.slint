@@ -7,7 +7,7 @@
 import { Theme, Elevation } from "theme.slint";
 import { Icon, Icons } from "icons.slint";
 import { Button, ButtonKind, TextField, FieldLabel, Avatar, Divider, IconButton } from "controls.slint";
-import { MemberRow, MessageRow, ConversationRow } from "models.slint";
+import { MemberRow, MessageRow, ConversationRow, ChannelRow } from "models.slint";
 
 // The dim behind a dialog. Clicking it dismisses, the way the web client's
 // backdrop does.
@@ -248,6 +248,7 @@ export component SettingsDialog {
                 Rectangle { height: 8px; }
 
                 HorizontalLayout {
+                    height: 38px;
                     spacing: 8px;
                     alignment: start;
                     Button {
@@ -427,6 +428,7 @@ export component ConfirmDialog {
             }
             Rectangle { vertical-stretch: 1; }
             HorizontalLayout {
+                height: 38px;
                 spacing: 8px;
                 alignment: end;
                 Button {
@@ -438,6 +440,234 @@ export component ConfirmDialog {
                     label: root.confirm-label;
                     kind: ButtonKind.danger;
                     clicked => { root.confirmed(); }
+                }
+            }
+        }
+    }
+}
+
+// A full-size image, opened from an attachment.
+//
+// Deliberately not a `Dialog`: a lightbox has no titled card, it is the
+// picture and a way out of it.
+export component Lightbox {
+    in property <image> picture;
+    in property <string> filename;
+    in property <string> caption;
+    callback dismissed();
+    callback download();
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #000000e0;
+        TouchArea {
+            clicked => { root.dismissed(); }
+        }
+    }
+
+    // The picture is inset from the window so the backdrop is always
+    // clickable, however large the image is.
+    Rectangle {
+        x: 72px;
+        y: 72px;
+        width: root.width - 144px;
+        height: root.height - 144px;
+
+        Image {
+            width: 100%;
+            height: 100%;
+            source: root.picture;
+            image-fit: contain;
+        }
+        // Swallows the click so the backdrop's dismiss does not fire when
+        // someone clicks the picture itself.
+        TouchArea {}
+    }
+
+    // Filename and the way out, along the top.
+    Rectangle {
+        height: 56px;
+        background: #00000066;
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 10px;
+            spacing: 12px;
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 1px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.filename;
+                    color: white;
+                    font-size: 13.5px;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                if root.caption != "": Text {
+                    text: root.caption;
+                    color: #ffffffb3;
+                    font-size: 11.5px;
+                    overflow: elide;
+                }
+            }
+
+            IconButton {
+                icon: Icons.download;
+                tooltip: "Open in the browser";
+                colour: #ffffffb3;
+                active-colour: white;
+                y: (parent.height - self.height) / 2;
+                clicked => { root.download(); }
+            }
+            IconButton {
+                icon: Icons.close;
+                tooltip: "Close";
+                colour: #ffffffb3;
+                active-colour: white;
+                y: (parent.height - self.height) / 2;
+                clicked => { root.dismissed(); }
+            }
+        }
+    }
+}
+
+// Forward a message to another channel.
+//
+// Forwarded as a quote with attribution and a link back, not as a copy
+// under your own name — the same shape the web client sends, so a forward
+// reads identically whichever client sent it.
+export component ForwardDialog {
+    in property <[ChannelRow]> channels;
+    in property <string> selected;
+    in property <string> preview-author;
+    in property <string> preview-body;
+    in-out property <string> note;
+    in property <bool> busy;
+    callback dismissed();
+    callback choose(string);
+    callback forward();
+
+    Dialog {
+        width: root.width;
+        height: root.height;
+        title: "Forward message";
+        dialog-width: 460px;
+        dialog-height: 520px;
+        dismissed => { root.dismissed(); }
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 0px;
+
+            // What is being forwarded.
+            Rectangle {
+                height: 74px;
+                background: Theme.surface-0;
+                border-radius: Theme.radius-control;
+                border-width: 1px;
+                border-color: Theme.border;
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 4px;
+                    Text {
+                        text: root.preview-author;
+                        color: Theme.text;
+                        font-size: 12.8px;
+                        font-weight: 650;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.preview-body;
+                        color: Theme.text-muted;
+                        font-size: 12.4px;
+                        wrap: word-wrap;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            Rectangle { height: 16px; }
+            FieldLabel { text: "SEND TO"; }
+            Rectangle { height: 6px; }
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: Theme.surface-0;
+                border-radius: Theme.radius-control;
+                border-width: 1px;
+                border-color: Theme.border;
+                clip: true;
+
+                Flickable {
+                    content-height: list.preferred-height;
+                    list := VerticalLayout {
+                        // Items start at the top; without this a short list
+                        // is pushed to the bottom of the space it is given.
+                        alignment: start;
+                        padding: 6px;
+                        spacing: 1px;
+                        for channel in root.channels: Rectangle {
+                            height: 34px;
+                            background: channel.id == root.selected ? Theme.accent-soft
+                                : pick.has-hover ? Theme.surface-2 : transparent;
+                            border-radius: Theme.radius-small;
+                            animate background { duration: Theme.fast; }
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 9px;
+                                Icon {
+                                    data: channel.kind == "announcement" ? Icons.megaphone
+                                        : channel.private ? Icons.shield
+                                        : Icons.hash;
+                                    size: 14px;
+                                    colour: channel.id == root.selected
+                                        ? Theme.accent : Theme.text-faint;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                                Text {
+                                    text: channel.name;
+                                    color: channel.id == root.selected ? Theme.text : Theme.text-muted;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+
+                            pick := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => { root.choose(channel.id); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 14px; }
+            TextField {
+                placeholder: "Say something about it (optional)";
+                text <=> root.note;
+            }
+            Rectangle { height: 14px; }
+
+            HorizontalLayout {
+                height: 38px;
+                spacing: 8px;
+                alignment: end;
+                Button {
+                    label: "Cancel";
+                    kind: ButtonKind.ghost;
+                    clicked => { root.dismissed(); }
+                }
+                Button {
+                    label: root.busy ? "Forwarding\u{2026}" : "Forward";
+                    kind: ButtonKind.primary;
+                    busy: root.busy;
+                    enabled: root.selected != "" && !root.busy;
+                    clicked => { root.forward(); }
                 }
             }
         }

@@ -43,6 +43,7 @@ export component ChatPane {
     callback open-pins();
     callback react(string, string);
     callback reply-to(string);
+    callback forward-message(string);
     callback edit-message(string);
     callback delete-message(string);
     callback pin-message(string);
@@ -262,6 +263,7 @@ export component ChatPane {
                         cancel-edit => { root.cancel-edit(); }
                         react(id, emoji) => { root.react(id, emoji); }
                         reply => { root.reply-to(message.id); }
+                        forward => { root.forward-message(message.id); }
                         edit => { root.edit-message(message.id); }
                         remove => { root.delete-message(message.id); }
                         pin => { root.pin-message(message.id); }

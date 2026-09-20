@@ -249,6 +249,7 @@ export component MessageItem {
     property <bool> editing: root.editing-id != "" && root.editing-id == root.message.id;
     callback react(string, string);
     callback reply();
+    callback forward();
     callback edit();
     callback remove();
     callback pin();
@@ -638,6 +639,10 @@ export component MessageItem {
                 IconButton {
                     icon: Icons.reply; tooltip: "Reply"; size: 26px; glyph: 15px;
                     clicked => { root.reply(); }
+                }
+                IconButton {
+                    icon: Icons.forward; tooltip: "Forward"; size: 26px; glyph: 15px;
+                    clicked => { root.forward(); }
                 }
                 IconButton {
                     icon: Icons.pin;

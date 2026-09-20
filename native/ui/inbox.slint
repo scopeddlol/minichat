@@ -169,6 +169,7 @@ export component Inbox {
                 Flickable {
                     content-height: list.preferred-height;
                     list := VerticalLayout {
+                        alignment: start;
                         padding: 8px;
                         spacing: 2px;
                         for conversation in root.conversations: ConversationButton {

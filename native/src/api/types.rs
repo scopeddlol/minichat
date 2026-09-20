@@ -690,3 +690,146 @@ mod tests {
         assert_eq!(me.permissions, "1073741824");
     }
 }
+
+// --- direct calls -------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CallStatus {
+    Ringing,
+    Accepted,
+    #[default]
+    Ended,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct DirectCall {
+    pub id: String,
+    #[serde(default)]
+    pub conversation_id: String,
+    #[serde(default)]
+    pub caller_id: String,
+    #[serde(default)]
+    pub status: CallStatus,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+impl DirectCall {
+    pub fn is_live(&self) -> bool {
+        matches!(self.status, CallStatus::Ringing | CallStatus::Accepted)
+    }
+}
+
+// --- administration ------------------------------------------------------
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct BanEntry {
+    pub user_id: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub banned_by: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Invite {
+    pub code: String,
+    #[serde(default)]
+    pub created_by: Option<String>,
+    #[serde(default)]
+    pub role_id: Option<String>,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default)]
+    pub max_uses: i64,
+    #[serde(default)]
+    pub uses: i64,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub revoked: bool,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct AuditEntry {
+    pub id: String,
+    #[serde(default)]
+    pub actor_id: Option<String>,
+    #[serde(default)]
+    pub actor_name: Option<String>,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default)]
+    pub target_type: String,
+    #[serde(default)]
+    pub target_id: String,
+    #[serde(default)]
+    pub detail: String,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ActivityDay {
+    #[serde(default)]
+    pub day: String,
+    #[serde(default)]
+    pub count: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct TopChannel {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub count: i64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Stats {
+    #[serde(default)]
+    pub members: i64,
+    #[serde(default)]
+    pub online: i64,
+    #[serde(default)]
+    pub in_voice: i64,
+    #[serde(default)]
+    pub messages: i64,
+    #[serde(default)]
+    pub channels: i64,
+    #[serde(default)]
+    pub roles: i64,
+    #[serde(default)]
+    pub invites: i64,
+    #[serde(default)]
+    pub bans: i64,
+    #[serde(default)]
+    pub storage_bytes: i64,
+    #[serde(default)]
+    pub joined_last_week: i64,
+    #[serde(default)]
+    pub messages_last_week: i64,
+    #[serde(default)]
+    pub activity: Vec<ActivityDay>,
+    #[serde(default)]
+    pub top_channels: Vec<TopChannel>,
+    #[serde(default)]
+    pub voice_enabled: bool,
+    #[serde(default)]
+    pub public_url: String,
+    #[serde(default)]
+    pub version: String,
+}

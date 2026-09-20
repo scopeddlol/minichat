@@ -13,7 +13,7 @@ import { MemberPanel } from "members.slint";
 import { Inbox } from "inbox.slint";
 import { Button, ButtonKind, TextField, FieldLabel, Avatar } from "controls.slint";
 import { Icon, Icons } from "icons.slint";
-import { SettingsDialog, ProfileDialog, ConfirmDialog } from "modals.slint";
+import { SettingsDialog, ProfileDialog, ConfirmDialog, Lightbox, ForwardDialog } from "modals.slint";
 import { SidePanel, ContextMenu, EmojiPicker, SearchHit, EmojiEntry, EmojiRow, MenuItem } from "panels.slint";
 import {
     MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup, ConversationRow,
@@ -29,7 +29,7 @@ export {
 export enum SidePanelKind { none, search, pins }
 
 // Which dialog covers the app, if any.
-export enum Overlay { none, settings, profile, confirm, emoji, menu }
+export enum Overlay { none, settings, profile, confirm, emoji, menu, lightbox, forward }
 
 // Which screen the window is showing.
 export enum Screen { connect, signin, chat }
@@ -295,6 +295,13 @@ export component App inherits Window {
     callback open-invites();
     callback open-profile();
     callback channel-menu(string);
+    callback category-menu(string);
+    in property <bool> can-reorder;
+    in property <string> dragging-channel;
+    in property <length> drag-offset;
+    callback drag-start(string);
+    callback drag-move(length);
+    callback drag-end();
     callback send(string);
     callback cancel-reply();
     callback remove-attachment(string);
@@ -306,6 +313,7 @@ export component App inherits Window {
     callback open-pins();
     callback react(string, string);
     callback reply-to(string);
+    callback forward-message(string);
     callback edit-message(string);
     callback delete-message(string);
     callback pin-message(string);
@@ -350,6 +358,22 @@ export component App inherits Window {
     in property <[EmojiRow]> emoji-custom;
     in property <[EmojiRow]> emoji-unicode;
     in-out property <string> emoji-filter;
+
+    // --- lightbox ---------------------------------------------------------
+    in property <image> lightbox-picture;
+    in property <string> lightbox-filename;
+    in property <string> lightbox-caption;
+    callback lightbox-download();
+
+    // --- forwarding -------------------------------------------------------
+    in property <[ChannelRow]> forward-targets;
+    in property <string> forward-target;
+    in property <string> forward-author;
+    in property <string> forward-body;
+    in-out property <string> forward-note;
+    in property <bool> forwarding;
+    callback choose-forward-target(string);
+    callback confirm-forward();
 
     in property <[MenuItem]> menu-items;
     in property <length> pointer-x;
@@ -538,6 +562,13 @@ export component App inherits Window {
                 open-invites => { root.open-invites(); }
                 open-profile => { root.open-profile(); }
                 channel-menu(id) => { root.channel-menu(id); }
+                category-menu(id) => { root.category-menu(id); }
+                can-reorder: root.can-reorder;
+                dragging-channel: root.dragging-channel;
+                drag-offset: root.drag-offset;
+                drag-start(id) => { root.drag-start(id); }
+                drag-move(dy) => { root.drag-move(dy); }
+                drag-end => { root.drag-end(); }
             }
 
             if root.inbox-open: Inbox {
@@ -593,6 +624,7 @@ export component App inherits Window {
                 open-pins => { root.open-pins(); }
                 react(id, emoji) => { root.react(id, emoji); }
                 reply-to(id) => { root.reply-to(id); }
+                forward-message(id) => { root.forward-message(id); }
                 edit-message(id) => { root.edit-message(id); }
                 delete-message(id) => { root.delete-message(id); }
                 pin-message(id) => { root.pin-message(id); }
@@ -692,6 +724,30 @@ export component App inherits Window {
         anchor-y: root.pointer-y;
         chose(name) => { root.choose-emoji(name); }
         dismissed => { root.dismiss-overlay(); }
+    }
+
+    if root.overlay == Overlay.lightbox: Lightbox {
+        width: root.width;
+        height: root.height;
+        picture: root.lightbox-picture;
+        filename: root.lightbox-filename;
+        caption: root.lightbox-caption;
+        dismissed => { root.dismiss-overlay(); }
+        download => { root.lightbox-download(); }
+    }
+
+    if root.overlay == Overlay.forward: ForwardDialog {
+        width: root.width;
+        height: root.height;
+        channels: root.forward-targets;
+        selected: root.forward-target;
+        preview-author: root.forward-author;
+        preview-body: root.forward-body;
+        note <=> root.forward-note;
+        busy: root.forwarding;
+        dismissed => { root.dismiss-overlay(); }
+        choose(id) => { root.choose-forward-target(id); }
+        forward => { root.confirm-forward(); }
     }
 
     if root.overlay == Overlay.menu: ContextMenu {

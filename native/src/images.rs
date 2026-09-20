@@ -24,6 +24,18 @@ const MAX_ENTRIES: usize = 512;
 /// Attachment previews are scaled down to this before decoding is kept, so a
 /// 6000px photo does not sit in memory at full size for a 400px preview.
 pub const MAX_PREVIEW: u32 = 1024;
+/// What the lightbox shows. Larger than a preview, still bounded: the
+/// lightbox is a window, not a reason to hold a 100-megapixel bitmap.
+pub const MAX_FULL: u32 = 2560;
+
+/// The cache key for the full-size copy of an image.
+///
+/// A preview and a lightbox want the same URL at different resolutions, and
+/// keeping one under the other's key means whichever loaded first wins —
+/// either a blurry lightbox or a preview that costs six times what it needs.
+fn full_key(url: &str) -> String {
+    format!("full\u{1}{url}")
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -64,6 +76,28 @@ impl Cache {
     /// image as "show the fallback", so this never needs an Option in markup.
     pub fn get_or_blank(&self, url: &str) -> Image {
         self.get(url).unwrap_or_default()
+    }
+
+    /// The full-size copy, falling back to the preview so the lightbox has
+    /// something to show while the larger one is still arriving.
+    pub fn get_full_or_preview(&self, url: &str) -> Image {
+        self.get(&full_key(url))
+            .or_else(|| self.get(url))
+            .unwrap_or_default()
+    }
+
+    /// Claim a URL for fetching at full size.
+    pub fn claim_full(&self, url: &str) -> bool {
+        self.claim(&full_key(url))
+    }
+
+    /// Store bytes as the full-size copy.
+    pub fn insert_full(&self, url: &str, bytes: &[u8]) -> bool {
+        self.insert(&full_key(url), bytes, MAX_FULL)
+    }
+
+    pub fn fail_full(&self, url: &str) {
+        self.fail(&full_key(url));
     }
 
     pub fn state(&self, url: &str) -> State {
@@ -202,6 +236,20 @@ mod tests {
         assert_eq!(cache.state("https://x/bad.png"), State::Failed);
         // A failed URL is never claimed again, so it costs one request.
         assert!(!cache.claim("https://x/bad.png"));
+    }
+
+    #[test]
+    fn a_preview_and_a_full_copy_are_kept_separately() {
+        // Otherwise whichever loaded first wins: a blurry lightbox, or a
+        // preview costing six times what it needs.
+        let cache = Cache::new();
+        cache.claim("https://x/a.png");
+        cache.insert("https://x/a.png", &tiny_png(), 64);
+
+        // The preview being present must not satisfy the lightbox.
+        assert!(cache.claim_full("https://x/a.png"));
+        // And until the full copy arrives, the preview stands in.
+        assert_eq!(cache.get_full_or_preview("https://x/a.png").size().width, 2);
     }
 
     #[test]

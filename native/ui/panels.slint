@@ -166,6 +166,7 @@ export component EmojiPicker {
             Flickable {
                 content-height: grid.preferred-height;
                 grid := VerticalLayout {
+                    alignment: start;
                     spacing: 8px;
 
                     if root.custom.length > 0: NavLabel { text: "THIS COMMUNITY"; }
@@ -308,6 +309,7 @@ export component SidePanel {
             Flickable {
                 content-height: results.preferred-height;
                 results := VerticalLayout {
+                    alignment: start;
                     padding: 8px;
                     spacing: 2px;
 

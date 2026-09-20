@@ -62,6 +62,8 @@ pub struct Store {
     pub voice_enabled: bool,
     pub livekit_url: String,
     pub ready: bool,
+    /// From `/api/admin/instance`, which only an administrator can read.
+    pub public_url: String,
     pub notifications: NotificationPreferences,
 }
 
@@ -242,6 +244,15 @@ impl Store {
         if let Some(last) = self.messages_in(channel).last() {
             self.last_read.insert(channel.to_string(), last.id.clone());
         }
+    }
+
+    /// The instance's public URL, for links that leave the client.
+    ///
+    /// Only `/api/admin/instance` carries it, so before an admin has looked
+    /// at that screen this is empty — callers omit the link rather than
+    /// producing a broken one.
+    pub fn instance_public_url(&self) -> String {
+        self.public_url.clone()
     }
 
     pub fn total_unread(&self) -> i64 {
