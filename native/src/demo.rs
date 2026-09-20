@@ -403,6 +403,23 @@ pub fn show_overlay(app: &ui::App, which: &str) {
             app.set_direct_messages(app.get_messages());
             app.set_loading_direct(false);
         }
+        "friends" => {
+            let groups = app.get_member_groups();
+            let person = |group: usize, row: usize| {
+                groups
+                    .row_data(group)
+                    .and_then(|g| g.members.row_data(row))
+                    .unwrap_or_default()
+            };
+            app.set_inbox_open(true);
+            app.set_inbox_tab(1);
+            app.set_friend_requests(ModelRc::new(VecModel::from(vec![person(0, 3)])));
+            app.set_friends(ModelRc::new(VecModel::from(vec![
+                person(0, 1),
+                person(0, 2),
+            ])));
+            app.set_blocked_members(ModelRc::new(VecModel::from(vec![person(1, 0)])));
+        }
         "forward" => {
             let rows = app.get_messages();
             if let Some(row) = rows.row_data(3) {

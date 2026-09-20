@@ -289,15 +289,32 @@ export component ProfileDialog {
     in property <string> joined;
     in property <image> banner;
     in property <bool> is-me;
+    /// "friend", "outgoing", "incoming", "blocked" or "none".
+    in property <string> relationship;
+    in property <bool> favourite;
     callback dismissed();
     callback message();
+    callback add-friend();
+    callback remove-friend();
+    callback block();
+    callback unblock();
+    callback toggle-favourite();
 
     Dialog {
         width: root.width;
         height: root.height;
         title: "Profile";
         dialog-width: 420px;
-        dialog-height: root.bio != "" ? 460px : 380px;
+        // Sized from what is actually in it. A fixed height was fine until
+        // the friend actions arrived and pushed the buttons off the card.
+        dialog-height: 300px
+            + (root.member.status != "" ? 34px : 0px)
+            + (root.bio != "" ? 92px : 0px)
+            + (root.favourite-game != "" ? 48px : 0px)
+            + (root.joined != "" ? 26px : 0px)
+            + (root.is-me ? 0px
+                : root.relationship == "blocked" ? 58px
+                : 144px);
         dismissed => { root.dismissed(); }
 
         VerticalLayout {
@@ -389,12 +406,71 @@ export component ProfileDialog {
 
                 Rectangle { vertical-stretch: 1; }
 
-                if !root.is-me: Button {
-                    label: "Send a message";
-                    kind: ButtonKind.primary;
-                    icon: Icons.message-square;
+                // What you can do about this person. A blocked member gets
+                // one button and nothing else: the rest would be offering
+                // to talk to someone you have said you do not want to.
+                if !root.is-me && root.relationship == "blocked": Button {
+                    label: "Unblock";
+                    kind: ButtonKind.subtle;
                     wide: true;
-                    clicked => { root.message(); }
+                    height: 38px;
+                    clicked => { root.unblock(); }
+                }
+
+                if !root.is-me && root.relationship != "blocked": VerticalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        label: "Send a message";
+                        kind: ButtonKind.primary;
+                        icon: Icons.message-square;
+                        wide: true;
+                        height: 38px;
+                        clicked => { root.message(); }
+                    }
+
+                    HorizontalLayout {
+                        height: 38px;
+                        spacing: 8px;
+
+                        // One button whose meaning follows the relationship,
+                        // rather than four that are mostly disabled.
+                        Button {
+                            label: root.relationship == "friend" ? "Remove friend"
+                                : root.relationship == "outgoing" ? "Cancel request"
+                                : root.relationship == "incoming" ? "Accept request"
+                                : "Add friend";
+                            kind: root.relationship == "incoming"
+                                ? ButtonKind.primary : ButtonKind.subtle;
+                            icon: root.relationship == "friend" ? Icons.user-minus
+                                : root.relationship == "incoming" ? Icons.check
+                                : Icons.user-plus;
+                            wide: true;
+                            clicked => {
+                                if (root.relationship == "friend"
+                                    || root.relationship == "outgoing") {
+                                    root.remove-friend();
+                                } else {
+                                    root.add-friend();
+                                }
+                            }
+                        }
+
+                        Button {
+                            label: root.favourite ? "Favourited" : "Favourite";
+                            kind: ButtonKind.ghost;
+                            icon: Icons.star;
+                            clicked => { root.toggle-favourite(); }
+                        }
+                    }
+
+                    Button {
+                        label: "Block";
+                        kind: ButtonKind.danger;
+                        wide: true;
+                        height: 38px;
+                        clicked => { root.block(); }
+                    }
                 }
             }
         }

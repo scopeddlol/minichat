@@ -84,6 +84,11 @@ enum Task {
         channel: String,
     },
     LoadConversations,
+    LoadRelationships,
+    Relate {
+        user: String,
+        action: Relate,
+    },
     ReorderChannels(Vec<crate::reorder::Placement>),
     ReorderCategories(Vec<(String, i64)>),
     OpenConversation {
@@ -166,6 +171,7 @@ enum Event {
     },
     AttachFailed(String),
     Reordered,
+    Relationships(Vec<Relationship>),
     Conversations(Vec<Conversation>),
     ConversationOpened(Box<Conversation>),
     DirectHistory {
@@ -211,6 +217,8 @@ struct AppState {
     pending_attachments: Vec<Attachment>,
     /// Why the last attachment did not upload.
     attach_notice: String,
+    /// Which tab the inbox is on: 0 conversations, 1 friends.
+    inbox_tab: i32,
     /// The channel the pointer went down on, which becomes the dragged one
     /// once the pointer has moved far enough to mean it.
     pressed_channel: Option<String>,
@@ -274,6 +282,16 @@ const PINNED_WITHIN: f32 = 90.0;
 /// Far enough ahead that the page usually arrives before they reach the end.
 const PREFETCH_WITHIN: f32 = 400.0;
 
+/// A change to how I relate to another member.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Relate {
+    Add,
+    Remove,
+    Block,
+    Unblock,
+    Favourite(bool),
+}
+
 /// An action held behind a confirmation.
 #[derive(Clone, Debug, PartialEq)]
 enum Confirm {
@@ -308,6 +326,7 @@ impl AppState {
             window_focused: true,
             pending_attachments: Vec::new(),
             attach_notice: String::new(),
+            inbox_tab: 0,
             pressed_channel: None,
             dragging: None,
             drag_offset: 0.0,
@@ -827,6 +846,37 @@ async fn serve(mut tasks: mpsc::UnboundedReceiver<Task>, events: mpsc::Unbounded
                 });
             }
 
+            Task::LoadRelationships => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let list = client.relationships().await.unwrap_or_default();
+                    let _ = events.send(Event::Relationships(list));
+                });
+            }
+
+            Task::Relate { user, action } => {
+                let (Some(client), events) = (client.clone(), events.clone()) else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let outcome = match action {
+                        Relate::Add => client.add_friend(&user).await.map(|_| ()),
+                        Relate::Remove => client.remove_friend(&user).await.map(|_| ()),
+                        Relate::Block => client.block_user(&user).await.map(|_| ()),
+                        Relate::Unblock => client.unblock_user(&user).await.map(|_| ()),
+                        Relate::Favourite(on) => client.set_favourite(&user, on).await.map(|_| ()),
+                    };
+                    // Refetched either way: the local guess is there so the
+                    // button answers at once, and the server's answer is
+                    // what the client ends up holding.
+                    let _ = outcome;
+                    let list = client.relationships().await.unwrap_or_default();
+                    let _ = events.send(Event::Relationships(list));
+                });
+            }
+
             Task::LoadConversations => {
                 let (Some(client), events) = (client.clone(), events.clone()) else {
                     continue;
@@ -1029,10 +1079,15 @@ fn handle_event(
             if !avatars.is_empty() {
                 let _ = tasks.send(Task::FetchImages(avatars));
             }
+            let _ = tasks.send(Task::LoadRelationships);
+            let _ = tasks.send(Task::LoadConversations);
             true
         }
 
         Event::Gateway(frame) => {
+            if frame.event == "RELATIONSHIPS_STALE" {
+                let _ = tasks.send(Task::LoadRelationships);
+            }
             let mut state_ref = state.borrow_mut();
             let changed = state_ref.store.apply_event(&frame, now);
 
@@ -1275,6 +1330,11 @@ fn handle_event(
         // The server accepted the move; the gateway's CHANNEL_UPDATEs carry
         // the new positions, so there is nothing to apply here.
         Event::Reordered => false,
+
+        Event::Relationships(list) => {
+            state.borrow_mut().store.relationships = list;
+            true
+        }
 
         Event::Conversations(list) => {
             state.borrow_mut().store.conversations = list;
@@ -1577,8 +1637,9 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
     }
     app.set_can_send(store.can_send_in(&selected));
 
+    let visible = store.visible_messages_in(&selected);
     let rows = view::build_messages_with_roles(
-        store.messages_in(&selected),
+        &visible,
         &store.members,
         &store.emojis,
         &store.roles,
@@ -1750,6 +1811,17 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
                 .unwrap_or_default(),
         );
         app.set_profile_is_me(member.id == store.me.member.id);
+        app.set_profile_relationship(
+            match store.relationship(&member.id) {
+                RelationshipKind::Friend => "friend",
+                RelationshipKind::Outgoing => "outgoing",
+                RelationshipKind::Incoming => "incoming",
+                RelationshipKind::Blocked => "blocked",
+                RelationshipKind::None => "none",
+            }
+            .into(),
+        );
+        app.set_profile_favourite(store.is_favourite(&member.id));
     }
 
     // --- the emoji picker ---------------------------------------------------
@@ -1789,7 +1861,10 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
 
     // --- direct messages ---------------------------------------------------
     app.set_inbox_open(store.inbox_open);
-    app.set_direct_unread(store.direct_unread() as i32);
+    // Friend requests are counted with unread conversations: both are
+    // things waiting on you behind that one button, and a request is
+    // otherwise invisible until you happen to open the inbox.
+    app.set_direct_unread((store.direct_unread() + store.incoming_requests() as i64) as i32);
     app.set_total_unread((store.total_unread() + store.direct_unread()) as i32);
     app.set_voice_enabled(store.voice_enabled);
     app.set_selected_conversation(store.selected_conversation.clone().into());
@@ -1832,6 +1907,20 @@ fn refresh(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<Task>) {
         })
         .collect();
     app.set_conversations(ModelRc::new(VecModel::from(conversations)));
+    app.set_inbox_tab(state_ref.inbox_tab);
+
+    let people = |kind: RelationshipKind| -> Vec<ui::MemberRow> {
+        store.related(kind).into_iter().map(to_member).collect()
+    };
+    app.set_friend_requests(ModelRc::new(VecModel::from(people(
+        RelationshipKind::Incoming,
+    ))));
+    app.set_friends(ModelRc::new(VecModel::from(people(
+        RelationshipKind::Friend,
+    ))));
+    app.set_blocked_members(ModelRc::new(VecModel::from(people(
+        RelationshipKind::Blocked,
+    ))));
 
     if let Some(peer) = store.peer(&store.selected_conversation) {
         app.set_peer_name(peer.name().into());
@@ -2522,6 +2611,22 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
         }
     });
 
+    app.on_choose_inbox_tab({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |index| {
+            let Some(app) = weak.upgrade() else { return };
+            state.borrow_mut().inbox_tab = index;
+            if index == 1 {
+                // The friends tab is the one place a stale list is visible,
+                // so it is refreshed on the way in.
+                let _ = tasks.send(Task::LoadRelationships);
+            }
+            refresh(&app, &state, &tasks);
+        }
+    });
+
     app.on_close_inbox({
         let weak = app.as_weak();
         let state = state.clone();
@@ -2606,6 +2711,80 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             let _ = tasks.send(Task::OpenConversation {
                 peer: id.to_string(),
             });
+        }
+    });
+
+    // --- friends and blocking --------------------------------------------
+    //
+    // Each of these guesses the outcome locally so the button answers at
+    // once, then refetches: the server decides, and a request that crossed
+    // with theirs becomes a friendship rather than a second request.
+    fn relate(
+        app: &ui::App,
+        state: &Shared,
+        tasks: &mpsc::UnboundedSender<Task>,
+        user: &str,
+        action: Relate,
+    ) {
+        if user.is_empty() {
+            return;
+        }
+        {
+            let mut state_ref = state.borrow_mut();
+            match action {
+                Relate::Add => {
+                    // Accepting an incoming request and sending a new one
+                    // are the same call; the guess differs.
+                    let kind = match state_ref.store.relationship(user) {
+                        RelationshipKind::Incoming => RelationshipKind::Friend,
+                        _ => RelationshipKind::Outgoing,
+                    };
+                    state_ref.store.set_relationship(user, kind);
+                }
+                Relate::Remove => state_ref
+                    .store
+                    .set_relationship(user, RelationshipKind::None),
+                Relate::Block => state_ref
+                    .store
+                    .set_relationship(user, RelationshipKind::Blocked),
+                Relate::Unblock => state_ref
+                    .store
+                    .set_relationship(user, RelationshipKind::None),
+                Relate::Favourite(on) => state_ref.store.set_favourite(user, on),
+            }
+        }
+        let _ = tasks.send(Task::Relate {
+            user: user.to_string(),
+            action,
+        });
+        refresh(app, state, tasks);
+    }
+
+    macro_rules! relationship_handler {
+        ($setter:ident, $action:expr) => {{
+            let weak = app.as_weak();
+            let state = state.clone();
+            let tasks = tasks.clone();
+            app.$setter(move |id| {
+                let Some(app) = weak.upgrade() else { return };
+                relate(&app, &state, &tasks, &id, $action);
+            });
+        }};
+    }
+
+    relationship_handler!(on_add_friend, Relate::Add);
+    relationship_handler!(on_remove_friend, Relate::Remove);
+    relationship_handler!(on_block_member, Relate::Block);
+    relationship_handler!(on_unblock_member, Relate::Unblock);
+
+    app.on_toggle_favourite({
+        let weak = app.as_weak();
+        let state = state.clone();
+        let tasks = tasks.clone();
+        move |id| {
+            let Some(app) = weak.upgrade() else { return };
+            let now_favourite = !state.borrow().store.is_favourite(&id);
+            relate(&app, &state, &tasks, &id, Relate::Favourite(now_favourite));
         }
     });
 
@@ -3327,11 +3506,48 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
             let state_ref = state.borrow();
             let bits = state_ref.store.permissions;
             let is_me = id.as_str() == state_ref.store.me.member.id;
+            let relationship = state_ref.store.relationship(&id);
+            let favourite = state_ref.store.is_favourite(&id);
             drop(state_ref);
 
             let mut items = vec![menu_item("profile", "View profile", "", false, false)];
             if !is_me {
                 items.push(menu_item("dm", "Send a message", "", false, false));
+
+                // What the friend entry says depends on where you already
+                // are, so the menu never offers a step that does nothing.
+                match relationship {
+                    RelationshipKind::Blocked => {
+                        items.push(menu_item("unblock", "Unblock", "", false, true));
+                    }
+                    kind => {
+                        items.push(menu_item(
+                            "friend",
+                            match kind {
+                                RelationshipKind::Friend => "Remove friend",
+                                RelationshipKind::Outgoing => "Cancel friend request",
+                                RelationshipKind::Incoming => "Accept friend request",
+                                _ => "Add friend",
+                            },
+                            "",
+                            false,
+                            true,
+                        ));
+                        items.push(menu_item(
+                            "favourite",
+                            if favourite {
+                                "Remove favourite"
+                            } else {
+                                "Favourite"
+                            },
+                            "",
+                            false,
+                            false,
+                        ));
+                        items.push(menu_item("block", "Block", "", true, true));
+                    }
+                }
+
                 // Moderation actions only appear to someone who has them.
                 if crate::perms::can(bits, crate::perms::KICK_MEMBERS) {
                     items.push(menu_item("kick", "Kick from community", "", true, true));
@@ -3394,6 +3610,23 @@ fn wire_callbacks(app: &ui::App, state: &Shared, tasks: &mpsc::UnboundedSender<T
                 }
                 ("dm", Some(MenuTarget::Member(id))) => {
                     let _ = tasks.send(Task::OpenConversation { peer: id });
+                }
+                ("friend", Some(MenuTarget::Member(id))) => {
+                    let action = match state.borrow().store.relationship(&id) {
+                        RelationshipKind::Friend | RelationshipKind::Outgoing => Relate::Remove,
+                        _ => Relate::Add,
+                    };
+                    relate(&app, &state, &tasks, &id, action);
+                }
+                ("favourite", Some(MenuTarget::Member(id))) => {
+                    let on = !state.borrow().store.is_favourite(&id);
+                    relate(&app, &state, &tasks, &id, Relate::Favourite(on));
+                }
+                ("block", Some(MenuTarget::Member(id))) => {
+                    relate(&app, &state, &tasks, &id, Relate::Block);
+                }
+                ("unblock", Some(MenuTarget::Member(id))) => {
+                    relate(&app, &state, &tasks, &id, Relate::Unblock);
                 }
                 ("reply", Some(MenuTarget::Message(id))) => {
                     state.borrow_mut().replying_to = Some(id);

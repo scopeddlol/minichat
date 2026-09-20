@@ -147,6 +147,26 @@ impl Store {
         self.messages.get(channel).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    /// A channel's messages with blocked members' removed.
+    ///
+    /// Blocking is enforced on the server for direct messages, but a channel
+    /// is shared — the server cannot drop a message for one reader. So the
+    /// client hides them, which is what blocking means from the reader's
+    /// side. Kept separate from `messages_in` so the raw list is still
+    /// available to anything that needs it, such as resolving a reply.
+    pub fn visible_messages_in(&self, channel: &str) -> Vec<Message> {
+        self.messages_in(channel)
+            .iter()
+            .filter(|message| {
+                message
+                    .author_id()
+                    .map(|id| !self.is_blocked(id))
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect()
+    }
+
     /// Record that a channel's history was used, and drop the least recently
     /// used one once too many are held.
     pub fn touch(&mut self, channel: &str) {
@@ -243,6 +263,76 @@ impl Store {
         self.mentions.remove(channel);
         if let Some(last) = self.messages_in(channel).last() {
             self.last_read.insert(channel.to_string(), last.id.clone());
+        }
+    }
+
+    /// How I relate to another member, from my point of view.
+    pub fn relationship(&self, user: &str) -> RelationshipKind {
+        self.relationships
+            .iter()
+            .find(|r| r.user_id == user)
+            .map(|r| r.kind)
+            .unwrap_or(RelationshipKind::None)
+    }
+
+    pub fn is_favourite(&self, user: &str) -> bool {
+        self.relationships
+            .iter()
+            .any(|r| r.user_id == user && r.favourite)
+    }
+
+    /// Whether a member is blocked, which hides their messages.
+    pub fn is_blocked(&self, user: &str) -> bool {
+        self.relationship(user) == RelationshipKind::Blocked
+    }
+
+    /// Members in a given relationship, in the order the member list is in.
+    pub fn related(&self, kind: RelationshipKind) -> Vec<&Member> {
+        self.relationships
+            .iter()
+            .filter(|r| r.kind == kind)
+            .filter_map(|r| self.member(&r.user_id))
+            .collect()
+    }
+
+    /// Friend requests waiting on an answer, which is what the inbox badges.
+    pub fn incoming_requests(&self) -> usize {
+        self.relationships
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Incoming)
+            .count()
+    }
+
+    /// Apply a relationship change locally so the UI answers immediately
+    /// rather than waiting for the refetch the server asks for.
+    pub fn set_relationship(&mut self, user: &str, kind: RelationshipKind) {
+        match self.relationships.iter_mut().find(|r| r.user_id == user) {
+            Some(existing) => existing.kind = kind,
+            None => self.relationships.push(Relationship {
+                user_id: user.to_string(),
+                kind,
+                favourite: false,
+            }),
+        }
+        // `None` means no relationship at all, so it is removed rather than
+        // left as a row that says "nothing".
+        if kind == RelationshipKind::None {
+            self.relationships
+                .retain(|r| r.user_id != user || r.favourite);
+            if let Some(row) = self.relationships.iter_mut().find(|r| r.user_id == user) {
+                row.kind = RelationshipKind::None;
+            }
+        }
+    }
+
+    pub fn set_favourite(&mut self, user: &str, favourite: bool) {
+        match self.relationships.iter_mut().find(|r| r.user_id == user) {
+            Some(existing) => existing.favourite = favourite,
+            None => self.relationships.push(Relationship {
+                user_id: user.to_string(),
+                kind: RelationshipKind::None,
+                favourite,
+            }),
         }
     }
 
@@ -1041,6 +1131,71 @@ mod tests {
             },
         );
         assert_eq!(store.direct_in("c1").len(), 1);
+    }
+
+    #[test]
+    fn a_blocked_members_messages_are_hidden_from_a_channel() {
+        // The server cannot drop a channel message for one reader, so
+        // blocking has to be honoured here or it does nothing in channels.
+        let mut store = store_with_me("me");
+        store.apply_event(&frame("MESSAGE_CREATE", message("1", "general", "ada")), 0);
+        store.apply_event(&frame("MESSAGE_CREATE", message("2", "general", "spam")), 0);
+        assert_eq!(store.visible_messages_in("general").len(), 2);
+
+        store.set_relationship("spam", RelationshipKind::Blocked);
+        let visible = store.visible_messages_in("general");
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].id, "1");
+        // The raw list is untouched, so a reply to a hidden message still
+        // resolves its author.
+        assert_eq!(store.messages_in("general").len(), 2);
+    }
+
+    #[test]
+    fn a_relationship_answers_immediately_and_can_be_cleared() {
+        let mut store = store_with_me("me");
+        assert_eq!(store.relationship("ada"), RelationshipKind::None);
+
+        store.set_relationship("ada", RelationshipKind::Outgoing);
+        assert_eq!(store.relationship("ada"), RelationshipKind::Outgoing);
+
+        store.set_relationship("ada", RelationshipKind::Friend);
+        assert_eq!(store.relationship("ada"), RelationshipKind::Friend);
+        assert_eq!(
+            store.relationships.len(),
+            1,
+            "the row is updated, not added"
+        );
+
+        // Unfriending with no favourite leaves no row behind.
+        store.set_relationship("ada", RelationshipKind::None);
+        assert!(store.relationships.is_empty());
+    }
+
+    #[test]
+    fn a_favourite_survives_unfriending() {
+        // Favourites are private and independent of friendship; losing one
+        // when a friendship ends would quietly discard the member's own
+        // bookmark.
+        let mut store = store_with_me("me");
+        store.set_relationship("ada", RelationshipKind::Friend);
+        store.set_favourite("ada", true);
+        store.set_relationship("ada", RelationshipKind::None);
+
+        assert!(store.is_favourite("ada"));
+        assert_eq!(store.relationship("ada"), RelationshipKind::None);
+    }
+
+    #[test]
+    fn blocking_is_visible_and_counts_incoming_requests() {
+        let mut store = store_with_me("me");
+        store.set_relationship("spam", RelationshipKind::Blocked);
+        assert!(store.is_blocked("spam"));
+
+        store.set_relationship("ada", RelationshipKind::Incoming);
+        store.set_relationship("grace", RelationshipKind::Incoming);
+        store.set_relationship("alan", RelationshipKind::Friend);
+        assert_eq!(store.incoming_requests(), 2);
     }
 
     #[test]

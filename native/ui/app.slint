@@ -251,6 +251,11 @@ export component App inherits Window {
     in property <image> peer-avatar;
     in property <color> peer-avatar-fallback;
     in property <string> peer-initials;
+    in property <[MemberRow]> friend-requests;
+    in property <[MemberRow]> friends;
+    in property <[MemberRow]> blocked-members;
+    in property <int> inbox-tab;
+    callback choose-inbox-tab(int);
     in property <bool> loading-direct;
     in-out property <string> direct-draft;
     in property <bool> voice-enabled;
@@ -346,6 +351,13 @@ export component App inherits Window {
     in property <string> profile-joined;
     in property <image> profile-banner;
     in property <bool> profile-is-me;
+    in property <string> profile-relationship;
+    in property <bool> profile-favourite;
+    callback add-friend(string);
+    callback remove-friend(string);
+    callback block-member(string);
+    callback unblock-member(string);
+    callback toggle-favourite(string);
 
     in property <string> confirm-title;
     in property <string> confirm-body;
@@ -582,6 +594,15 @@ export component App inherits Window {
                 peer-avatar: root.peer-avatar;
                 peer-avatar-fallback: root.peer-avatar-fallback;
                 peer-initials: root.peer-initials;
+                requests: root.friend-requests;
+                friends: root.friends;
+                blocked: root.blocked-members;
+                tab: root.inbox-tab;
+                choose-tab(index) => { root.choose-inbox-tab(index); }
+                accept-request(id) => { root.add-friend(id); }
+                decline-request(id) => { root.remove-friend(id); }
+                unblock(id) => { root.unblock-member(id); }
+                message-friend(id) => { root.message-member(id); }
                 loading: root.loading-direct;
                 draft <=> root.direct-draft;
                 voice-enabled: root.voice-enabled;
@@ -700,8 +721,15 @@ export component App inherits Window {
         joined: root.profile-joined;
         banner: root.profile-banner;
         is-me: root.profile-is-me;
+        relationship: root.profile-relationship;
+        favourite: root.profile-favourite;
         dismissed => { root.dismiss-overlay(); }
         message => { root.message-member(root.profile-member.id); }
+        add-friend => { root.add-friend(root.profile-member.id); }
+        remove-friend => { root.remove-friend(root.profile-member.id); }
+        block => { root.block-member(root.profile-member.id); }
+        unblock => { root.unblock-member(root.profile-member.id); }
+        toggle-favourite => { root.toggle-favourite(root.profile-member.id); }
     }
 
     if root.overlay == Overlay.confirm: ConfirmDialog {
