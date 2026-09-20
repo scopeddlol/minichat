@@ -5,6 +5,10 @@
 //! so it must not be able to decide how much memory the client spends. A
 //! miss renders the fallback (initials, or a file card) rather than blocking
 //! a repaint, and the fetch happens off the UI thread.
+//!
+//! The state and size accessors are part of the cache's surface even where
+//! only the loading path uses them today.
+#![allow(dead_code)]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -156,7 +160,10 @@ mod tests {
         let mut bytes = Vec::new();
         let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([90, 110, 232, 255]));
         image::DynamicImage::ImageRgba8(image)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .unwrap();
         bytes
     }
@@ -210,7 +217,10 @@ mod tests {
         let mut bytes = Vec::new();
         let big = image::RgbaImage::from_pixel(400, 200, image::Rgba([0, 0, 0, 255]));
         image::DynamicImage::ImageRgba8(big)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .unwrap();
 
         cache.claim("https://x/big.png");

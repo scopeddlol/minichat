@@ -219,7 +219,8 @@ mod tests {
 
     #[test]
     fn frames_parse_and_tolerate_a_missing_payload() {
-        let frame: Frame = serde_json::from_str(r#"{"t":"MESSAGE_CREATE","d":{"id":"1"}}"#).unwrap();
+        let frame: Frame =
+            serde_json::from_str(r#"{"t":"MESSAGE_CREATE","d":{"id":"1"}}"#).unwrap();
         assert_eq!(frame.event, "MESSAGE_CREATE");
         assert_eq!(frame.data["id"], "1");
 

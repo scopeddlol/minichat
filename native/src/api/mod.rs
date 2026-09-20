@@ -1,4 +1,9 @@
 //! The MiniChat HTTP API, mirroring `web/src/lib/api.ts`.
+//!
+//! The endpoints are covered as a set rather than one at a time as screens
+//! need them, so the client is a complete description of the API and adding
+//! a screen is not also an exercise in adding a request.
+#![allow(dead_code)]
 
 pub mod types;
 
@@ -76,10 +81,16 @@ pub fn normalise_origin(input: &str) -> Result<String> {
                 "The address must start with https:// — voice and uploads need it.".into(),
             ))
         }
-        _ => return Err(ApiError::Invalid("The address must start with https://".into())),
+        _ => {
+            return Err(ApiError::Invalid(
+                "The address must start with https://".into(),
+            ))
+        }
     }
     if url.host_str().is_none() {
-        return Err(ApiError::Invalid("That doesn't look like a valid address.".into()));
+        return Err(ApiError::Invalid(
+            "That doesn't look like a valid address.".into(),
+        ));
     }
     if !url.username().is_empty() || url.password().is_some() {
         return Err(ApiError::Invalid(
@@ -87,11 +98,7 @@ pub fn normalise_origin(input: &str) -> Result<String> {
         ));
     }
 
-    let mut origin = format!(
-        "{}://{}",
-        url.scheme(),
-        url.host_str().unwrap_or_default()
-    );
+    let mut origin = format!("{}://{}", url.scheme(), url.host_str().unwrap_or_default());
     if let Some(port) = url.port() {
         origin.push_str(&format!(":{port}"));
     }
@@ -100,7 +107,11 @@ pub fn normalise_origin(input: &str) -> Result<String> {
 
 /// The `wss://` address of the gateway for an origin.
 pub fn gateway_url(origin: &str) -> String {
-    let scheme = if origin.starts_with("https://") { "wss" } else { "ws" };
+    let scheme = if origin.starts_with("https://") {
+        "wss"
+    } else {
+        "ws"
+    };
     let host = origin
         .split_once("://")
         .map(|(_, rest)| rest)
@@ -203,9 +214,8 @@ impl Client {
             return Err(ApiError::Server(detail));
         }
 
-        serde_json::from_str(&text).map_err(|e| {
-            ApiError::Server(format!("The instance sent something unexpected: {e}"))
-        })
+        serde_json::from_str(&text)
+            .map_err(|e| ApiError::Server(format!("The instance sent something unexpected: {e}")))
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -236,8 +246,11 @@ impl Client {
     // --- auth ----------------------------------------------------------
 
     pub async fn login(&self, username: &str, password: &str) -> Result<AuthResponse> {
-        self.post("/auth/login", json!({ "username": username, "password": password }))
-            .await
+        self.post(
+            "/auth/login",
+            json!({ "username": username, "password": password }),
+        )
+        .await
     }
 
     pub async fn register(
@@ -329,8 +342,11 @@ impl Client {
     }
 
     pub async fn edit_message(&self, id: &str, content: &str) -> Result<Message> {
-        self.patch(&format!("/messages/{}", encode(id)), json!({ "content": content }))
-            .await
+        self.patch(
+            &format!("/messages/{}", encode(id)),
+            json!({ "content": content }),
+        )
+        .await
     }
 
     pub async fn delete_message(&self, id: &str) -> Result<serde_json::Value> {
@@ -347,7 +363,8 @@ impl Client {
     }
 
     pub async fn pins(&self, channel: &str) -> Result<Vec<Message>> {
-        self.get(&format!("/channels/{}/pins", encode(channel))).await
+        self.get(&format!("/channels/{}/pins", encode(channel)))
+            .await
     }
 
     pub async fn react(&self, id: &str, emoji: &str, on: bool) -> Result<serde_json::Value> {
@@ -389,7 +406,10 @@ impl Client {
         self.get("/notifications").await
     }
 
-    pub async fn update_notifications(&self, payload: serde_json::Value) -> Result<NotificationPreferences> {
+    pub async fn update_notifications(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<NotificationPreferences> {
         self.patch("/notifications", payload).await
     }
 
@@ -423,12 +443,16 @@ impl Client {
         }
         if let Some(length) = response.content_length() {
             if length as usize > max {
-                return Err(ApiError::Invalid("That file is too large to display.".into()));
+                return Err(ApiError::Invalid(
+                    "That file is too large to display.".into(),
+                ));
             }
         }
         let bytes = response.bytes().await.map_err(|_| ApiError::Unreachable)?;
         if bytes.len() > max {
-            return Err(ApiError::Invalid("That file is too large to display.".into()));
+            return Err(ApiError::Invalid(
+                "That file is too large to display.".into(),
+            ));
         }
         Ok(bytes.to_vec())
     }
@@ -446,7 +470,10 @@ mod tests {
 
     #[test]
     fn https_is_assumed_and_trailing_slashes_go() {
-        assert_eq!(normalise_origin(" chat.example.com/ ").unwrap(), "https://chat.example.com");
+        assert_eq!(
+            normalise_origin(" chat.example.com/ ").unwrap(),
+            "https://chat.example.com"
+        );
         assert_eq!(
             normalise_origin("https://chat.example.com/invite/x").unwrap(),
             "https://chat.example.com"
@@ -455,8 +482,14 @@ mod tests {
 
     #[test]
     fn plain_http_is_only_allowed_on_the_loopback() {
-        assert_eq!(normalise_origin("http://localhost:8080").unwrap(), "http://localhost:8080");
-        assert_eq!(normalise_origin("http://127.0.0.1:8080").unwrap(), "http://127.0.0.1:8080");
+        assert_eq!(
+            normalise_origin("http://localhost:8080").unwrap(),
+            "http://localhost:8080"
+        );
+        assert_eq!(
+            normalise_origin("http://127.0.0.1:8080").unwrap(),
+            "http://127.0.0.1:8080"
+        );
         assert!(normalise_origin("http://chat.example.com").is_err());
     }
 

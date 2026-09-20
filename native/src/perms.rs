@@ -4,6 +4,11 @@
 //! safe integer range once ADMINISTRATOR is set. Rust has no such problem —
 //! `u64` holds them all — but the server still sends them as a decimal string,
 //! so they are parsed rather than deserialised as a number.
+//!
+//! Every flag the server defines is named here, not only the ones a screen
+//! checks today: the set is the permission model, and a partial copy is how
+//! a client ends up silently ignoring a permission it should honour.
+#![allow(dead_code)]
 
 macro_rules! permissions {
     ($($name:ident = $bit:expr, $label:expr, $group:expr;)*) => {
@@ -104,7 +109,10 @@ mod tests {
         // ADMINISTRATOR alone is 2^30, past what a float would hold exactly
         // once combined with the rest.
         assert_eq!(parse("1073741824"), ADMINISTRATOR);
-        assert_eq!(parse("1073741827"), ADMINISTRATOR | SEND_MESSAGES | VIEW_CHANNELS);
+        assert_eq!(
+            parse("1073741827"),
+            ADMINISTRATOR | SEND_MESSAGES | VIEW_CHANNELS
+        );
         assert_eq!(parse(""), 0);
         assert_eq!(parse("nonsense"), 0);
     }

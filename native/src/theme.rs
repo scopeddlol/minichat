@@ -87,6 +87,11 @@ fn linear_to_srgb(channel: f32) -> f32 {
     }
 }
 
+// The matrices are quoted at the precision Björn Ottosson published them
+// at. Trimming them to what an f32 holds exactly would make this file
+// disagree with every other implementation, including the browser's, which
+// is the one thing it must not do.
+#[allow(clippy::excessive_precision)]
 fn to_oklab(colour: Rgb) -> [f32; 3] {
     let r = srgb_to_linear(colour.r as f32 / 255.0);
     let g = srgb_to_linear(colour.g as f32 / 255.0);
@@ -103,6 +108,7 @@ fn to_oklab(colour: Rgb) -> [f32; 3] {
     ]
 }
 
+#[allow(clippy::excessive_precision)]
 fn from_oklab(lab: [f32; 3]) -> Rgb {
     let [big_l, a, b] = lab;
 
@@ -266,6 +272,43 @@ impl Palette {
     }
 }
 
+/// Push a palette into the `Theme` global so the whole interface retints.
+pub fn apply(app: &crate::ui::App, palette: &Palette) {
+    use crate::ui::Theme as Tokens;
+    use slint::ComponentHandle;
+
+    let theme = app.global::<Tokens>();
+
+    theme.set_bg(palette.bg.to_slint());
+    theme.set_surface_0(palette.surface_0.to_slint());
+    theme.set_surface_1(palette.surface_1.to_slint());
+    theme.set_surface_2(palette.surface_2.to_slint());
+    theme.set_surface_3(palette.surface_3.to_slint());
+    theme.set_border(palette.border.to_slint());
+    theme.set_border_soft(palette.border_soft.to_slint());
+
+    theme.set_text(palette.text.to_slint());
+    theme.set_text_muted(palette.text_muted.to_slint());
+    theme.set_text_faint(palette.text_faint.to_slint());
+
+    theme.set_accent(palette.accent.to_slint());
+    theme.set_accent_soft(palette.accent.with_alpha(ACCENT_SOFT_ALPHA));
+    theme.set_accent_glow(palette.accent.with_alpha(ACCENT_GLOW_ALPHA));
+    theme.set_accent_ink(palette.accent_ink.to_slint());
+    theme.set_accent_hover(palette.accent_hover.to_slint());
+
+    theme.set_success(SUCCESS.to_slint());
+    theme.set_warning(WARNING.to_slint());
+    theme.set_danger(DANGER.to_slint());
+    // `.btn-danger` mixes the danger colour with transparency at 16/30/26%.
+    theme.set_danger_bg(DANGER.with_alpha(0.16));
+    theme.set_danger_border(DANGER.with_alpha(0.30));
+    theme.set_danger_hover(DANGER.with_alpha(0.26));
+
+    theme.set_radius_card(palette.corner_radius);
+    theme.set_light(palette.light);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,41 +396,4 @@ mod tests {
         assert_eq!(clamped(100.0), 28.0);
         assert_eq!(clamped(14.0), 14.0);
     }
-}
-
-/// Push a palette into the `Theme` global so the whole interface retints.
-pub fn apply(app: &crate::ui::App, palette: &Palette) {
-    use crate::ui::Theme as Tokens;
-    use slint::ComponentHandle;
-
-    let theme = app.global::<Tokens>();
-
-    theme.set_bg(palette.bg.to_slint());
-    theme.set_surface_0(palette.surface_0.to_slint());
-    theme.set_surface_1(palette.surface_1.to_slint());
-    theme.set_surface_2(palette.surface_2.to_slint());
-    theme.set_surface_3(palette.surface_3.to_slint());
-    theme.set_border(palette.border.to_slint());
-    theme.set_border_soft(palette.border_soft.to_slint());
-
-    theme.set_text(palette.text.to_slint());
-    theme.set_text_muted(palette.text_muted.to_slint());
-    theme.set_text_faint(palette.text_faint.to_slint());
-
-    theme.set_accent(palette.accent.to_slint());
-    theme.set_accent_soft(palette.accent.with_alpha(ACCENT_SOFT_ALPHA));
-    theme.set_accent_glow(palette.accent.with_alpha(ACCENT_GLOW_ALPHA));
-    theme.set_accent_ink(palette.accent_ink.to_slint());
-    theme.set_accent_hover(palette.accent_hover.to_slint());
-
-    theme.set_success(SUCCESS.to_slint());
-    theme.set_warning(WARNING.to_slint());
-    theme.set_danger(DANGER.to_slint());
-    // `.btn-danger` mixes the danger colour with transparency at 16/30/26%.
-    theme.set_danger_bg(DANGER.with_alpha(0.16));
-    theme.set_danger_border(DANGER.with_alpha(0.30));
-    theme.set_danger_hover(DANGER.with_alpha(0.26));
-
-    theme.set_radius_card(palette.corner_radius);
-    theme.set_light(palette.light);
 }

@@ -17,6 +17,10 @@ pub struct MessageContext<'a> {
     /// The column available for the body, in pixels.
     pub width: f32,
     pub accent: Rgb,
+    /// The colour a name renders in when the member has no coloured role.
+    /// Part of the context rather than a constant: hardcoding the dark
+    /// theme's text colour leaves every author invisible in the light one.
+    pub text: Rgb,
     pub measurer: &'a layout::Measurer,
     /// The first message that arrived since the channel was last read, which
     /// gets the "NEW" rule above it.
@@ -101,7 +105,11 @@ fn build_attachments(files: &[Attachment], images: &Cache) -> (Vec<ui::Attachmen
         let loaded = picture.size().width > 0;
 
         // A file card is a fixed height; an image takes its preview's.
-        let row_height = if kind == "image" && loaded { preview_height } else { 58.0 };
+        let row_height = if kind == "image" && loaded {
+            preview_height
+        } else {
+            58.0
+        };
         height += row_height;
         if rows.len() + 1 < files.len() {
             height += 8.0;
@@ -183,7 +191,7 @@ pub fn build_messages_with_roles(
         emojis,
         me_id,
     };
-    let default_name_colour = Rgb::new(0xed, 0xed, 0xee);
+    let default_name_colour = context.text;
 
     messages
         .iter()
@@ -245,7 +253,9 @@ pub fn build_messages_with_roles(
 
             let author = message.author.as_ref();
             let author_id = author.map(|a| a.id.clone()).unwrap_or_default();
-            let member = members.iter().find(|m| Some(&m.id) == author.map(|a| &a.id));
+            let member = members
+                .iter()
+                .find(|m| Some(&m.id) == author.map(|a| &a.id));
 
             let name_colour = member
                 .map(|m| role_colour(&m.roles, roles, default_name_colour))
@@ -256,9 +266,10 @@ pub fn build_messages_with_roles(
                 .or_else(|| member.and_then(|m| m.avatar_url.clone()))
                 .unwrap_or_default();
 
-            let reply = message.reply_to_id.as_ref().and_then(|id| {
-                messages.iter().find(|m| &m.id == id)
-            });
+            let reply = message
+                .reply_to_id
+                .as_ref()
+                .and_then(|id| messages.iter().find(|m| &m.id == id));
 
             let (attachments, attachments_height) =
                 build_attachments(&message.attachments, context.images);
@@ -306,7 +317,11 @@ pub fn build_messages_with_roles(
 
 /// Every image URL a set of messages will want, so they can be fetched in one
 /// pass rather than discovered one repaint at a time.
-pub fn referenced_images(messages: &[Message], members: &[Member], emojis: &[Emoji]) -> Vec<String> {
+pub fn referenced_images(
+    messages: &[Message],
+    members: &[Member],
+    emojis: &[Emoji],
+) -> Vec<String> {
     let mut urls = Vec::new();
 
     for message in messages {
@@ -367,6 +382,7 @@ mod tests {
             MessageContext {
                 width: 600.0,
                 accent: Rgb::new(0x5b, 0x6e, 0xe8),
+                text: Rgb::new(0xed, 0xed, 0xee),
                 measurer: &measurer,
                 first_unread: None,
                 images: &images,
@@ -410,6 +426,34 @@ mod tests {
         assert_eq!(rows[1].reply_excerpt, "the original question");
         // A reply always starts its own group, even from the same author.
         assert!(!rows[1].grouped);
+    }
+
+    #[test]
+    fn an_author_with_no_coloured_role_takes_the_theme_text_colour() {
+        // The light theme's text is near-black; the dark theme's is
+        // near-white. Hardcoding either makes authors invisible in the other.
+        let measurer = layout::Measurer::new();
+        let images = Cache::new();
+        let light_text = Rgb::new(0x20, 0x21, 0x24);
+        let rows = build_messages_with_roles(
+            &[message("1", "ada", "hello", "2026-03-04 10:00:00")],
+            &[Member {
+                id: "ada".into(),
+                ..Default::default()
+            }],
+            &[],
+            &[],
+            "me",
+            MessageContext {
+                width: 400.0,
+                accent: Rgb::new(0x5b, 0x6e, 0xe8),
+                text: light_text,
+                measurer: &measurer,
+                first_unread: None,
+                images: &images,
+            },
+        );
+        assert_eq!(rows[0].author_colour, light_text.to_slint());
     }
 
     #[test]

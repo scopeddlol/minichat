@@ -1,5 +1,10 @@
 //! Wire types, mirroring `web/src/lib/types.ts`.
 //!
+//! Fields are carried whether or not the client reads them yet: this is the
+//! shape of the API, and a partial mirror is the kind of thing that quietly
+//! drops a field when the feature that needs it lands. Hence the allow.
+#![allow(dead_code)]
+//!
 //! The server is the same one the web client talks to and its JSON is not
 //! versioned, so every field is either optional or carries a default: a server
 //! newer than this client must not be able to break deserialisation of the

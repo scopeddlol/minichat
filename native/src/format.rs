@@ -1,8 +1,13 @@
 //! Presentation helpers, mirroring `web/src/lib/format.ts`.
+//!
+//! The whole helper set is ported together so a screen that needs one is
+//! not also a change to this file.
+#![allow(dead_code)]
 
 use time::{format_description::FormatItem, macros::format_description, OffsetDateTime, UtcOffset};
 
-const TIME: &[FormatItem<'_>] = format_description!("[hour repr:12 padding:none]:[minute] [period]");
+const TIME: &[FormatItem<'_>] =
+    format_description!("[hour repr:12 padding:none]:[minute] [period]");
 const SHORT_DATE: &[FormatItem<'_>] = format_description!("[month repr:short] [day padding:none]");
 const LONG_DATE: &[FormatItem<'_>] =
     format_description!("[month repr:long] [day padding:none], [year]");
@@ -52,10 +57,7 @@ fn local(value: &str) -> OffsetDateTime {
 }
 
 pub fn time_of_day(value: &str) -> String {
-    local(value)
-        .format(TIME)
-        .unwrap_or_default()
-        .to_lowercase()
+    local(value).format(TIME).unwrap_or_default().to_lowercase()
 }
 
 pub fn full_date(value: &str) -> String {
@@ -266,8 +268,14 @@ mod tests {
     #[test]
     fn the_fallback_avatar_colour_is_stable_for_an_id() {
         let accent = crate::theme::Rgb::new(0x5b, 0x6e, 0xe8);
-        assert_eq!(avatar_colour("user-1", accent), avatar_colour("user-1", accent));
-        assert_ne!(avatar_colour("user-1", accent), avatar_colour("user-9", accent));
+        assert_eq!(
+            avatar_colour("user-1", accent),
+            avatar_colour("user-1", accent)
+        );
+        assert_ne!(
+            avatar_colour("user-1", accent),
+            avatar_colour("user-9", accent)
+        );
     }
 
     #[test]

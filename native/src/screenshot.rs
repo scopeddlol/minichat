@@ -12,7 +12,9 @@
 
 use std::rc::Rc;
 
-use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType, TargetPixel};
+use slint::platform::software_renderer::{
+    MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType, TargetPixel,
+};
 use slint::platform::{Platform, WindowAdapter};
 use slint::PhysicalSize;
 
@@ -49,7 +51,15 @@ where
 
     // Two passes: the first settles any binding that depends on a measured
     // size (wrapped text, flex children), the second paints the result.
-    let mut buffer = vec![Rgba8 { r: 0, g: 0, b: 0, a: 255 }; (width * height) as usize];
+    let mut buffer = vec![
+        Rgba8 {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255
+        };
+        (width * height) as usize
+    ];
     for _ in 0..2 {
         slint::platform::update_timers_and_animations();
         window.draw_if_needed(|renderer| {

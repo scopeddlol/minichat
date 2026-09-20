@@ -6,10 +6,10 @@
 //! block, a quote, a mention, a reply, a grouped run of messages, a member
 //! with a role colour and a badge.
 
-use slint::{Model, ModelRc, SharedString, VecModel};
+use slint::{ModelRc, SharedString, VecModel};
 
 use crate::api::types::{Emoji, Member, Message, MessageAuthor, Presence};
-use crate::text::{layout, markdown};
+use crate::text::layout;
 use crate::theme::{Palette, Rgb};
 use crate::ui;
 
@@ -243,6 +243,7 @@ pub fn populate(app: &ui::App, palette: &Palette) {
             // 1180 window − 264 sidebar − 236 members − 64 padding − 50 gutter.
             width: 566.0,
             accent,
+            text: palette.text,
             measurer: &measurer,
             first_unread: Some("m7"),
             images: &crate::images::Cache::new(),

@@ -165,7 +165,10 @@ impl Measurer {
             return cached;
         }
 
-        let Some(face) = self.faces.get(&key).or_else(|| self.faces.get(&FaceKey::Regular))
+        let Some(face) = self
+            .faces
+            .get(&key)
+            .or_else(|| self.faces.get(&FaceKey::Regular))
         else {
             // No bundled font parsed, which the font test would have caught.
             // Fall back to a monospace-ish estimate rather than zero, so text
@@ -183,13 +186,19 @@ impl Measurer {
         width
     }
 
-    /// Drop cached widths. Called when the bundled faces would change, which
-    /// today means never — it exists so a future custom-font setting has a
-    /// way to invalidate without restarting.
+    /// Drop cached widths.
+    ///
+    /// Called when the bundled faces would change, which today means never —
+    /// it exists so a future custom-font setting has a way to invalidate
+    /// without restarting.
+    #[allow(dead_code)]
     pub fn clear(&self) {
         self.cache.borrow_mut().clear();
     }
 
+    /// How many measurements are held. Used by the tests to prove the cache
+    /// is actually being hit rather than silently reshaping every time.
+    #[cfg(test)]
     pub fn cached_entries(&self) -> usize {
         self.cache.borrow().len()
     }
@@ -247,7 +256,14 @@ pub fn layout(blocks: &[Block], max_width: f32, measurer: &Measurer) -> Laid {
             Block::Quote(lines) => {
                 let start = y;
                 for line in lines {
-                    y = flow(line, QUOTE_INDENT, max_width - QUOTE_INDENT, y, measurer, &mut out);
+                    y = flow(
+                        line,
+                        QUOTE_INDENT,
+                        max_width - QUOTE_INDENT,
+                        y,
+                        measurer,
+                        &mut out,
+                    );
                 }
                 out.decorations.push(Decoration {
                     x: 0.0,
@@ -274,7 +290,10 @@ pub fn layout(blocks: &[Block], max_width: f32, measurer: &Measurer) -> Laid {
                         y: inner,
                         width,
                         height: mono_line,
-                        style: Style { code: true, ..Default::default() },
+                        style: Style {
+                            code: true,
+                            ..Default::default()
+                        },
                         size,
                         target: String::new(),
                         emoji_url: String::new(),
@@ -336,7 +355,11 @@ fn flow(
         }
 
         let is_emoji = !atom.emoji_url.is_empty();
-        let height = if is_emoji { BODY_SIZE * EMOJI_SCALE } else { line_height };
+        let height = if is_emoji {
+            BODY_SIZE * EMOJI_SCALE
+        } else {
+            line_height
+        };
 
         let decoration = match atom.style.kind {
             Kind::Mention => Some(DecorationKind::Mention),
@@ -353,7 +376,11 @@ fn flow(
             // The text sits inside its padding; the decoration below covers
             // the padding too.
             x: x + pad,
-            y: if is_emoji { y + (line_height - height) / 2.0 } else { y },
+            y: if is_emoji {
+                y + (line_height - height) / 2.0
+            } else {
+                y
+            },
             width: atom.width,
             height,
             style: atom.style,
@@ -377,11 +404,7 @@ fn flow(
 ///
 /// Done per line rather than per run so a mention that wrapped gets one pill
 /// per line, which is what a browser does with an inline background.
-fn flush_decorations(
-    out: &mut Laid,
-    pending: &mut Vec<(usize, DecorationKind, f32)>,
-    line: f32,
-) {
+fn flush_decorations(out: &mut Laid, pending: &mut Vec<(usize, DecorationKind, f32)>, line: f32) {
     for (index, kind, pad) in pending.drain(..) {
         let run = &out.runs[index];
         out.decorations.push(Decoration {
@@ -405,7 +428,10 @@ fn atomise(inlines: &[Inline], measurer: &Measurer) -> Vec<Atom> {
                 width: BODY_SIZE * EMOJI_SCALE,
                 size: BODY_SIZE,
                 pad: 0.0,
-                style: Style { kind: Kind::Emoji, ..Default::default() },
+                style: Style {
+                    kind: Kind::Emoji,
+                    ..Default::default()
+                },
                 target: name.clone(),
                 emoji_url: url.clone(),
                 breakable: false,

@@ -53,11 +53,20 @@ pub enum Inline {
     Text(Run),
     /// `href` is the full URL; the run carries the display text, which may be
     /// elided.
-    Link { run: Run, href: String },
+    Link {
+        run: Run,
+        href: String,
+    },
     /// `id` is the member's ID, so a click can open their profile.
-    Mention { run: Run, id: String },
+    Mention {
+        run: Run,
+        id: String,
+    },
     /// A custom emoji, drawn at 1.4× the line's text size.
-    Emoji { name: String, url: String },
+    Emoji {
+        name: String,
+        url: String,
+    },
 }
 
 /// A block-level element.
@@ -248,18 +257,66 @@ fn render_inline(text: &str, style: Style, context: &Context<'_>, out: &mut Vec<
         let inner = &remaining[found.inner.0..found.inner.1];
 
         match found.rule {
-            Rule::Code => push_text(out, inner, Style { code: true, ..style }),
-            Rule::Bold => render_inline(inner, Style { bold: true, ..style }, context, out),
-            Rule::Underline => {
-                render_inline(inner, Style { underline: true, ..style }, context, out)
-            }
-            Rule::Strike => render_inline(inner, Style { strike: true, ..style }, context, out),
-            Rule::Italic => render_inline(inner, Style { italic: true, ..style }, context, out),
-            Rule::Spoiler => render_inline(inner, Style { spoiler: true, ..style }, context, out),
+            Rule::Code => push_text(
+                out,
+                inner,
+                Style {
+                    code: true,
+                    ..style
+                },
+            ),
+            Rule::Bold => render_inline(
+                inner,
+                Style {
+                    bold: true,
+                    ..style
+                },
+                context,
+                out,
+            ),
+            Rule::Underline => render_inline(
+                inner,
+                Style {
+                    underline: true,
+                    ..style
+                },
+                context,
+                out,
+            ),
+            Rule::Strike => render_inline(
+                inner,
+                Style {
+                    strike: true,
+                    ..style
+                },
+                context,
+                out,
+            ),
+            Rule::Italic => render_inline(
+                inner,
+                Style {
+                    italic: true,
+                    ..style
+                },
+                context,
+                out,
+            ),
+            Rule::Spoiler => render_inline(
+                inner,
+                Style {
+                    spoiler: true,
+                    ..style
+                },
+                context,
+                out,
+            ),
             Rule::Link => out.push(Inline::Link {
                 run: Run {
                     text: crate::format::elide(whole, 64),
-                    style: Style { kind: Kind::Link, ..style },
+                    style: Style {
+                        kind: Kind::Link,
+                        ..style
+                    },
                 },
                 href: whole.to_string(),
             }),
@@ -311,7 +368,10 @@ fn push_mention(
         out.push(Inline::Mention {
             run: Run {
                 text: format!("@{name}"),
-                style: Style { kind: Kind::MentionSelf, ..style },
+                style: Style {
+                    kind: Kind::MentionSelf,
+                    ..style
+                },
             },
             id: String::new(),
         });
@@ -363,7 +423,9 @@ fn match_rule(rule: Rule, text: &str) -> Option<Match> {
         Rule::Bold => delimited(text, "**", "**", true),
         Rule::Underline => delimited(text, "__", "__", true),
         Rule::Strike => delimited(text, "~~", "~~", true),
-        Rule::Italic => delimited(text, "*", "*", false).or_else(|| delimited(text, "_", "_", false)),
+        Rule::Italic => {
+            delimited(text, "*", "*", false).or_else(|| delimited(text, "_", "_", false))
+        }
         Rule::Spoiler => delimited(text, "||", "||", true),
         Rule::Link => match_link(text),
         Rule::Mention => match_mention(text),
@@ -522,6 +584,9 @@ pub fn is_jumbo(content: &str) -> bool {
 }
 
 /// The plain text of a message, for search matching and notifications.
+///
+/// Neither is built yet; this is what they will both need.
+#[allow(dead_code)]
 pub fn to_plain(blocks: &[Block]) -> String {
     let mut out = String::new();
     for block in blocks {
@@ -545,6 +610,7 @@ pub fn to_plain(blocks: &[Block]) -> String {
     out.trim_end().to_string()
 }
 
+#[allow(dead_code)]
 fn push_inlines(out: &mut String, inlines: &[Inline]) {
     for inline in inlines {
         match inline {
