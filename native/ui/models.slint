@@ -1,0 +1,243 @@
+// The shapes the Rust side pushes into the UI.
+//
+// Everything the interface draws is derived state: the store in `src/store.rs`
+// owns the truth, and these are flattened views of it. Keeping the flattening
+// on the Rust side means a repaint never has to walk a member map or re-parse
+// a message body — the work happens once, when the data changes.
+
+// A piece of a message body, positioned by the flow layout in
+// `src/text/layout.rs`. See that module for why Slint is handed coordinates
+// rather than markup.
+export struct MessageRun {
+    text: string,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strike: bool,
+    code: bool,
+    spoiler: bool,
+    // The size the run was measured at. Painting at any other size makes
+    // the glyphs wider than the box measured for them, which clips them.
+    size: length,
+    // 0 plain, 1 link, 2 mention, 3 mention of me / @everyone, 4 custom emoji.
+    kind: int,
+    // A URL, a member ID, or an emoji name, by kind.
+    target: string,
+    // Set for a custom emoji, drawn in place of the text.
+    picture: image,
+}
+
+// A background under some runs: a code panel, a quote bar, a mention pill.
+export struct MessageDecoration {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    // 0 code block, 1 code chip, 2 quote bar, 3 mention, 4 mention of me,
+    // 5 spoiler.
+    kind: int,
+}
+
+export struct ReactionChip {
+    emoji: string,
+    count: int,
+    me: bool,
+    // Set when the reaction is a custom emoji rather than a unicode one.
+    picture: image,
+}
+
+export struct AttachmentRow {
+    id: string,
+    filename: string,
+    size: string,
+    url: string,
+    // "image", "video", "audio" or "file".
+    kind: string,
+    picture: image,
+    preview-width: length,
+    preview-height: length,
+}
+
+// A file uploaded and waiting to go with the next message.
+export struct PendingAttachment {
+    id: string,
+    filename: string,
+    size: string,
+    kind: string,
+    picture: image,
+}
+
+export struct MessageRow {
+    id: string,
+    author-id: string,
+    author-name: string,
+    author-colour: color,
+    timestamp: string,
+    avatar: image,
+    avatar-fallback: color,
+    initials: string,
+    // True when this message continues the one above it.
+    grouped: bool,
+    pinned: bool,
+    edited: bool,
+    pending: bool,
+    failed: bool,
+    // A system notice (a join, a pin) rather than someone's message.
+    system: bool,
+    system-text: string,
+    // Non-empty on the first message of a day.
+    day-divider: string,
+    // True on the first message that arrived since the channel was last read.
+    unread-marker: bool,
+    runs: [MessageRun],
+    decorations: [MessageDecoration],
+    body-height: length,
+    reactions: [ReactionChip],
+    attachments: [AttachmentRow],
+    // Measured in Rust with the rest of the body: an element inside an `if`
+    // has no id the surrounding bindings can reach, so the height cannot be
+    // read back out of the layout.
+    attachments-height: length,
+    reply-author: string,
+    reply-excerpt: string,
+    // Emoji-only messages render larger.
+    jumbo: bool,
+}
+
+export struct VoiceMember {
+    id: string,
+    name: string,
+    avatar: image,
+    avatar-fallback: color,
+    initials: string,
+    muted: bool,
+    deafened: bool,
+    streaming: bool,
+    video: bool,
+    speaking: bool,
+}
+
+export struct ChannelRow {
+    id: string,
+    name: string,
+    // "text", "voice" or "announcement".
+    kind: string,
+    description: string,
+    emoji: string,
+    private: bool,
+    unread: int,
+    mentions: int,
+    // Members currently in a voice channel, shown nested underneath.
+    voice-count: int,
+    voice-members: [VoiceMember],
+}
+
+export struct CategoryRow {
+    id: string,
+    name: string,
+    collapsed: bool,
+    private: bool,
+    channels: [ChannelRow],
+}
+
+export struct MemberRow {
+    id: string,
+    name: string,
+    status: string,
+    presence: string,
+    avatar: image,
+    avatar-fallback: color,
+    initials: string,
+    role-colour: color,
+    badge: string,
+    operator: bool,
+    speaking: bool,
+    muted: bool,
+    deafened: bool,
+}
+
+export struct MemberGroup {
+    name: string,
+    members: [MemberRow],
+}
+
+export struct ConversationRow {
+    id: string,
+    name: string,
+    excerpt: string,
+    timestamp: string,
+    avatar: image,
+    avatar-fallback: color,
+    initials: string,
+    presence: string,
+    unread: int,
+}
+
+// --- administration -----------------------------------------------------
+
+export struct StatTile {
+    label: string,
+    value: string,
+    detail: string,
+}
+
+/// One row of the overview's tile grid.
+export struct StatRow {
+    tiles: [StatTile],
+}
+
+export struct RoleRow {
+    id: string,
+    name: string,
+    colour: color,
+    coloured: bool,
+    badge: string,
+    members: int,
+    /// Whether the signed-in member may grant or remove this role, which is
+    /// a question of rank rather than of permission alone.
+    assignable: bool,
+    granted: bool,
+}
+
+export struct AdminMemberRow {
+    id: string,
+    name: string,
+    username: string,
+    avatar: image,
+    avatar-fallback: color,
+    initials: string,
+    presence: string,
+    roles: string,
+    joined: string,
+    operator: bool,
+    can-kick: bool,
+    can-ban: bool,
+}
+
+export struct InviteRow {
+    code: string,
+    url: string,
+    note: string,
+    uses: string,
+    expires: string,
+    revoked: bool,
+}
+
+export struct BanRow {
+    user-id: string,
+    name: string,
+    reason: string,
+    when: string,
+}
+
+export struct AuditRow {
+    id: string,
+    actor: string,
+    action: string,
+    detail: string,
+    when: string,
+}

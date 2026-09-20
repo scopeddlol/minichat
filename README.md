@@ -157,12 +157,18 @@ Installing matters on iPhone and iPad: Safari only delivers push notifications
 to apps on the Home Screen, never to a browser tab. Settings → **Notifications**
 says so in place of the toggle when it detects that situation.
 
-### Chromium-free Windows preview
+### Chromium-free desktop client
 
-The migration has started in [desktop-native](desktop-native/README.md): a native
-WPF client for sign-in, channel browsing and text messaging. It builds without
-Chromium or WebView2. Voice/video, DMs and administration still need porting, so
-the full-featured installer below remains available during the transition.
+[native](native/README.md) is a Rust client with [Slint](https://slint.dev) for
+the interface and no browser engine at all. It holds about 30 MB idle where the
+WebView2 shell holds several hundred, and ships as one binary with no runtime to
+install beside it.
+
+It covers channels, messages, direct messages, voice, search, administration and
+the rest of the daily surface. Voice audio is behind a `voice` build feature,
+because it carries libwebrtc and wants clang 21 to link; everything else builds
+without a C++ toolchain. The Tauri installer below remains the released build
+until the native one has been through accessibility testing on Windows.
 
 ### Windows desktop app
 
@@ -174,7 +180,10 @@ git tag v0.1.0 && git push --tags
 ```
 
 `.github/workflows/desktop.yml` produces an `.msi` and an `.exe` and attaches
-them to the release. To build locally on Windows:
+them to the release. It also runs on any change under `desktop/`, where it
+installs what it just built, checks it, and uninstalls again — the bundle
+configuration is only exercised when an installer is actually made, and a
+release is a bad moment to discover it cannot be. To build locally on Windows:
 
 ```bash
 cd desktop
@@ -184,6 +193,28 @@ npm run build
 
 On first launch the app asks for your instance address and remembers it.
 Right-click the tray icon → **Switch instance…** changes it later.
+
+#### Deploying it to a community
+
+Everyone on one instance types the same address, so the `.exe` setup takes it
+on the command line and writes it where the app looks:
+
+```bat
+MiniChat_0.5.0_x64-setup.exe /S /INSTANCE=https://chat.example.com
+```
+
+`/S` is NSIS's silent flag; drop it to watch the installer run. Quotes around
+the address are optional. The address is
+only written when there are no settings already — a reinstall never overrides
+what someone chose — and the app re-validates it on startup, so a bad value
+costs a trip to the connect screen and nothing more. The installer is per-user
+and needs no administrator.
+
+The installer's artwork lives in `desktop/icons/installer-*.bmp`, at the sizes
+NSIS and WiX demand, and is generated from the app icon by
+`desktop/icons/installer-art.py` so that the two cannot drift apart. What the
+installer *does* beyond copying files is `desktop/installer/hooks.nsh`, which
+is exactly the paragraph above and nothing else.
 
 If the connect screen says it can't reach the app's internals, the build was
 made without `withGlobalTauri` enabled in `desktop/tauri.conf.json` — the

@@ -1,0 +1,69 @@
+// Design tokens, mirroring `web/src/index.css`.
+//
+// Every surface colour in the web client is a CSS custom property so the
+// instance accent and surface tint can retint the whole app at runtime. The
+// same is true here: the palette is computed in Rust (src/theme.rs, which
+// reproduces the oklab `color-mix` the stylesheet uses) and pushed into this
+// global. Nothing below hardcodes a colour.
+
+export global Theme {
+    // --- surfaces, darkest to lightest ---------------------------------
+    in-out property <color> bg: #101112;
+    in-out property <color> surface-0: #151617;
+    in-out property <color> surface-1: #1b1c1e;
+    in-out property <color> surface-2: #232527;
+    in-out property <color> surface-3: #2c2e31;
+    in-out property <color> border: #343639;
+    in-out property <color> border-soft: #292b2e;
+
+    // --- text ------------------------------------------------------------
+    in-out property <color> text: #ededee;
+    in-out property <color> text-muted: #b2b4b8;
+    in-out property <color> text-faint: #85898f;
+
+    // --- accent ----------------------------------------------------------
+    in-out property <color> accent: #5b6ee8;
+    in-out property <color> accent-soft: #5b6ee82e;
+    in-out property <color> accent-glow: #5b6ee861;
+    in-out property <color> accent-ink: #ffffff;
+    // `--accent` mixed 88% with white: the primary button's hover.
+    in-out property <color> accent-hover: #7180eb;
+
+    // --- status ----------------------------------------------------------
+    in-out property <color> success: #34d399;
+    in-out property <color> warning: #fbbf24;
+    in-out property <color> danger: #f87171;
+    in-out property <color> danger-bg: #f8717129;
+    in-out property <color> danger-border: #f871714d;
+    in-out property <color> danger-hover: #f8717142;
+
+    // --- geometry --------------------------------------------------------
+    // `--radius-card`, which the operator can set between 0 and 28.
+    in-out property <length> radius-card: 10px;
+    in-out property <length> radius-control: 7px;
+    in-out property <length> radius-small: 5px;
+    in-out property <length> titlebar-h: 36px;
+
+    // --- type ------------------------------------------------------------
+    in-out property <string> font-sans: "Inter";
+    in-out property <string> font-mono: "JetBrains Mono";
+
+    in-out property <bool> light: false;
+    // Honours the system "reduce motion" setting; every transition below is
+    // gated on it, the way the stylesheet's media query is.
+    in-out property <bool> reduced-motion: false;
+
+    // Animation durations, collapsed to nothing when motion is reduced.
+    out property <duration> fast: root.reduced-motion ? 0ms : 120ms;
+    out property <duration> normal: root.reduced-motion ? 0ms : 150ms;
+    out property <duration> slow: root.reduced-motion ? 0ms : 280ms;
+}
+
+// Shadow tokens are drawn as layered rectangles rather than a box-shadow
+// property, which Slint does not have. These are the three the stylesheet
+// defines, at the alpha the dark theme uses.
+export global Elevation {
+    in-out property <color> shadow-sm: #0000004d;
+    in-out property <color> shadow-md: #00000080;
+    in-out property <color> shadow-lg: #000000a6;
+}

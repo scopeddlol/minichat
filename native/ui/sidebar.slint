@@ -1,0 +1,732 @@
+// The community sidebar: instance header, direct messages, the channel list
+// grouped into categories, and the member's own bar along the bottom.
+//
+// Measurements come from `.community-sidebar`, `.community-nav` and the
+// channel row rules in `web/src/index.css`.
+
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+import { Avatar, CountPill, IconButton, NavLabel, Divider } from "controls.slint";
+import { ChannelRow, CategoryRow, VoiceMember } from "models.slint";
+
+// One of the four buttons in the voice panel.
+component VoiceControl {
+    in property <string> icon;
+    in property <bool> danger: false;
+    in property <bool> active: false;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    horizontal-stretch: 1;
+
+    Rectangle {
+        background: root.danger ? Theme.danger-bg
+            : root.active ? Theme.accent-soft
+            : touch.has-hover && root.enabled ? Theme.surface-3 : Theme.surface-2;
+        border-radius: Theme.radius-control;
+        opacity: root.enabled ? 1.0 : 0.35;
+        animate background { duration: Theme.normal; }
+
+        Icon {
+            data: root.icon;
+            size: 16px;
+            colour: root.danger ? Theme.danger
+                : root.active ? Theme.accent : Theme.text-muted;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.not-allowed;
+        clicked => { root.clicked(); }
+    }
+}
+
+component VoiceSeat {
+    in property <VoiceMember> member;
+    callback activated();
+
+    height: 26px;
+
+    Rectangle {
+        background: seat.has-hover ? Theme.surface-1 : transparent;
+        border-radius: Theme.radius-small;
+
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 6px;
+            spacing: 7px;
+
+            Avatar {
+                size: 19px;
+                picture: root.member.avatar;
+                fallback: root.member.avatar-fallback;
+                initials: root.member.initials;
+                name: root.member.name;
+                speaking: root.member.speaking;
+                y: (parent.height - self.height) / 2;
+            }
+            Text {
+                text: root.member.name;
+                // Speaking brightens the name as well as ringing the avatar,
+                // so it reads at a glance in a long list.
+                color: root.member.speaking ? Theme.text : Theme.text-muted;
+                font-size: 12.3px;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            if root.member.streaming: Icon {
+                data: Icons.screen-share;
+                size: 12px;
+                colour: Theme.success;
+                y: (parent.height - self.height) / 2;
+            }
+            if root.member.video: Icon {
+                data: Icons.video;
+                size: 12px;
+                colour: Theme.success;
+                y: (parent.height - self.height) / 2;
+            }
+            if root.member.deafened: Icon {
+                data: Icons.headphones-off;
+                size: 13px;
+                colour: Theme.danger;
+                y: (parent.height - self.height) / 2;
+            }
+            if root.member.muted && !root.member.deafened: Icon {
+                data: Icons.mic-off;
+                size: 13px;
+                colour: Theme.danger;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+    }
+
+    seat := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.activated(); }
+    }
+}
+
+component ChannelButton {
+    in property <ChannelRow> channel;
+    in property <bool> selected;
+    /// Whether this member may reorder channels at all.
+    in property <bool> draggable;
+    /// How far this row has been dragged, when it is the one being dragged.
+    in property <length> drag-offset;
+    in property <bool> dragging;
+    callback activated();
+    callback context-menu();
+    callback open-member(string);
+    callback drag-started();
+    callback drag-moved(length);
+    callback drag-ended();
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // `.community-nav [data-channel-id]` — 11px/12px padding, 7px radius.
+        //
+        // The slot in the layout stays put; the visible row inside it is
+        // what follows the pointer, because a layout owns its children's y.
+        Rectangle {
+            height: root.channel.description == "" ? 38px : 48px;
+
+            row := Rectangle {
+                y: root.dragging ? root.drag-offset : 0;
+                width: 100%;
+                height: 100%;
+                background: root.dragging ? Theme.surface-3
+                    : root.selected ? Theme.surface-2
+                    : touch.has-hover ? Theme.surface-1 : transparent;
+                border-radius: Theme.radius-control;
+                border-width: root.dragging ? 1px : 0;
+                border-color: Theme.accent;
+                opacity: root.dragging ? 0.92 : 1.0;
+                animate background { duration: Theme.normal; easing: ease-out; }
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 10px;
+
+                // The glyph, or the channel's own emoji in its place.
+                if root.channel.emoji == "": Icon {
+                    data: root.channel.kind == "voice" ? Icons.volume
+                        : root.channel.kind == "announcement" ? Icons.megaphone
+                        : root.channel.private ? Icons.shield
+                        : Icons.hash;
+                    size: 17px;
+                    colour: root.selected || root.channel.unread > 0
+                        ? Theme.text : Theme.text-faint;
+                    y: (parent.height - self.height) / 2;
+                }
+                if root.channel.emoji != "": Text {
+                    text: root.channel.emoji;
+                    font-size: 15px;
+                    vertical-alignment: center;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 1px;
+
+                    Text {
+                        text: root.channel.name;
+                        // An unread channel is bolder and brighter; that is
+                        // the whole signal, there is no separate dot.
+                        color: root.selected || root.channel.unread > 0
+                            ? Theme.text : Theme.text-muted;
+                        font-size: 14px;
+                        font-weight: root.channel.unread > 0 ? 650 : 500;
+                        overflow: elide;
+                    }
+
+                    if root.channel.description != "": Text {
+                        text: root.channel.description;
+                        color: Theme.text-faint;
+                        font-size: 10.9px;
+                        overflow: elide;
+                    }
+                }
+
+                if root.channel.voice-count > 0: Text {
+                    text: root.channel.voice-count;
+                    color: Theme.text-faint;
+                    font-size: 10.9px;
+                    vertical-alignment: center;
+                }
+
+                if root.channel.mentions > 0: CountPill {
+                    count: root.channel.mentions;
+                    mention: true;
+                    y: (parent.height - self.height) / 2;
+                }
+                if root.channel.mentions == 0 && root.channel.unread > 0: CountPill {
+                    count: root.channel.unread;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+
+            touch := TouchArea {
+                mouse-cursor: root.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+
+                pointer-event(event) => {
+                    if (event.button == PointerEventButton.right
+                        && event.kind == PointerEventKind.down) {
+                        root.context-menu();
+                        return;
+                    }
+                    if (!root.draggable || event.button != PointerEventButton.left) {
+                        return;
+                    }
+                    if (event.kind == PointerEventKind.down) {
+                        root.drag-started();
+                    }
+                    if (event.kind == PointerEventKind.up) {
+                        root.drag-ended();
+                    }
+                }
+
+                // Reported while the button is held. A drag only begins past
+                // a few pixels, so an ordinary click is still a click and
+                // not a one-pixel reorder.
+                moved => {
+                    if (root.draggable && self.pressed) {
+                        root.drag-moved(self.mouse-y - self.pressed-y);
+                    }
+                }
+
+                clicked => {
+                    if (!root.dragging) {
+                        root.activated();
+                    }
+                }
+            }
+            }
+        }
+
+        // Who is in the voice channel, indented under it with a rule down
+        // the left, the way the web client nests them.
+        if root.channel.voice-members.length > 0: Rectangle {
+            height: 4px + root.channel.voice-members.length * 26px;
+
+            Rectangle {
+                x: 22px;
+                width: 1px;
+                background: Theme.border-soft;
+            }
+
+            VerticalLayout {
+                x: 30px;
+                y: 4px;
+                width: parent.width - 30px;
+                height: parent.height - 4px;
+                spacing: 0px;
+                for member in root.channel.voice-members: VoiceSeat {
+                    member: member;
+                    activated => { root.open-member(member.id); }
+                }
+            }
+        }
+    }
+}
+
+export component Sidebar {
+    in property <string> instance-name;
+    // The single letter shown when the instance has no icon. Taken here
+    // rather than sliced in the markup: Slint strings are not indexable,
+    // and the first *character* of a name is not its first byte.
+    in property <string> instance-initial;
+    in property <string> instance-tagline;
+    in property <image> instance-icon;
+    in property <[CategoryRow]> categories;
+    in property <[ChannelRow]> loose-channels;
+    in property <string> selected-channel;
+    in property <bool> inbox-open;
+    in property <int> direct-unread;
+    in property <bool> can-invite;
+
+    in property <string> my-name;
+    in property <string> my-status;
+    in property <image> my-avatar;
+    in property <color> my-avatar-fallback;
+    in property <string> my-initials;
+    in property <string> my-presence: "online";
+    in property <bool> can-admin;
+
+    // "connecting", "ready", "reconnecting" or "closed".
+    in property <string> connection: "ready";
+
+    // --- the member's own voice connection -----------------------------
+    in property <bool> voice-live;
+    in property <string> voice-channel;
+    in property <string> voice-summary;
+    in property <bool> voice-muted;
+    in property <bool> voice-deafened;
+    in property <bool> voice-can-speak;
+    in property <bool> voice-can-screen-share;
+    in property <bool> voice-screen-sharing;
+    /// Non-empty when the connection is not carrying audio, or failed.
+    in property <string> voice-notice;
+
+    callback select-channel(string);
+    callback toggle-category(string);
+    callback open-inbox();
+    callback open-settings();
+    callback open-admin();
+    callback open-invites();
+    callback open-profile();
+    callback channel-menu(string);
+    callback category-menu(string);
+    callback open-member(string);
+
+    // --- reordering ------------------------------------------------------
+    in property <bool> can-reorder;
+    in property <string> dragging-channel;
+    in property <length> drag-offset;
+    callback drag-start(string);
+    callback drag-move(length);
+    callback drag-end();
+    callback toggle-mute();
+    callback toggle-deafen();
+    callback toggle-screen-share();
+    callback leave-voice();
+
+    // `.community-sidebar { width: clamp(240px, 20vw, 288px) }`
+    width: 264px;
+
+    Rectangle {
+        background: Theme.surface-0;
+
+        VerticalLayout {
+            // --- instance header ---------------------------------------
+            Rectangle {
+                height: 56px;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 10px;
+                    spacing: 10px;
+
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 8px;
+                        background: Theme.accent;
+                        clip: true;
+
+                        if root.instance-icon.width > 0: Image {
+                            source: root.instance-icon;
+                            width: 100%;
+                            height: 100%;
+                            image-fit: cover;
+                        }
+                        if root.instance-icon.width == 0: Text {
+                            text: root.instance-initial;
+                            color: Theme.accent-ink;
+                            font-size: 15px;
+                            font-weight: 700;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 1px;
+                        Text {
+                            text: root.instance-name;
+                            color: Theme.text;
+                            font-size: 14px;
+                            font-weight: 650;
+                            overflow: elide;
+                        }
+                        if root.instance-tagline != "": Text {
+                            text: root.instance-tagline;
+                            color: Theme.text-faint;
+                            font-size: 11.2px;
+                            overflow: elide;
+                        }
+                    }
+
+                    if root.can-invite: IconButton {
+                        icon: Icons.user-plus;
+                        tooltip: "Invite people";
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.open-invites(); }
+                    }
+                }
+            }
+            Divider {}
+
+            // --- the list ------------------------------------------------
+            Flickable {
+                content-height: list.preferred-height;
+
+                list := VerticalLayout {
+                    alignment: start;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-top: 12px;
+                    padding-bottom: 24px;
+                    spacing: 2px;
+
+                    // Direct messages, above the community's own channels.
+                    Rectangle {
+                        height: 40px;
+                        Rectangle {
+                            background: root.inbox-open ? Theme.surface-2
+                                : inbox-touch.has-hover ? Theme.surface-1 : transparent;
+                            border-radius: Theme.radius-control;
+                            animate background { duration: Theme.normal; }
+
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                spacing: 12px;
+                                Icon {
+                                    data: Icons.message-square;
+                                    size: 17px;
+                                    colour: root.inbox-open ? Theme.text : Theme.text-muted;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                                Text {
+                                    text: "Direct messages";
+                                    color: root.inbox-open ? Theme.text : Theme.text-muted;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                if root.direct-unread > 0: CountPill {
+                                    count: root.direct-unread;
+                                    mention: true;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                        }
+                        inbox-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.open-inbox(); }
+                        }
+                    }
+
+                    // Channels with no category sit directly under the label.
+                    Rectangle { height: 14px; }
+                    NavLabel { text: "COMMUNITY"; x: 12px; }
+                    Rectangle { height: 6px; }
+
+                    for channel in root.loose-channels: ChannelButton {
+                        channel: channel;
+                        selected: channel.id == root.selected-channel && !root.inbox-open;
+                        draggable: root.can-reorder;
+                        dragging: root.dragging-channel == channel.id;
+                        drag-offset: root.drag-offset;
+                        activated => { root.select-channel(channel.id); }
+                        context-menu => { root.channel-menu(channel.id); }
+                        open-member(id) => { root.open-member(id); }
+                        drag-started => { root.drag-start(channel.id); }
+                        drag-moved(dy) => { root.drag-move(dy); }
+                        drag-ended => { root.drag-end(); }
+                    }
+
+                    for category in root.categories: VerticalLayout {
+                        spacing: 2px;
+
+                        Rectangle { height: 14px; }
+
+                        Rectangle {
+                            height: 20px;
+                            HorizontalLayout {
+                                padding-left: 6px;
+                                spacing: 3px;
+                                alignment: start;
+
+                                Icon {
+                                    data: category.collapsed
+                                        ? Icons.chevron-right : Icons.chevron-down;
+                                    size: 13px;
+                                    colour: cat-touch.has-hover ? Theme.text : Theme.text-faint;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                                Text {
+                                    text: category.name;
+                                    color: cat-touch.has-hover ? Theme.text : Theme.text-faint;
+                                    font-size: 10.9px;
+                                    font-weight: 700;
+                                    letter-spacing: 0.6px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                if category.private: Icon {
+                                    data: Icons.lock;
+                                    size: 11px;
+                                    colour: Theme.text-faint;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                            cat-touch := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.right
+                                        && event.kind == PointerEventKind.down) {
+                                        root.category-menu(category.id);
+                                    }
+                                }
+                                clicked => { root.toggle-category(category.id); }
+                            }
+                        }
+
+                        if !category.collapsed: VerticalLayout {
+                            spacing: 2px;
+                            for channel in category.channels: ChannelButton {
+                                channel: channel;
+                                selected: channel.id == root.selected-channel && !root.inbox-open;
+                                activated => { root.select-channel(channel.id); }
+                                context-menu => { root.channel-menu(channel.id); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- the voice connection --------------------------------------
+            //
+            // `.animate-fade-up` in the web client: it appears above the
+            // member's own bar while connected and is gone otherwise.
+            if root.voice-live: Rectangle {
+                height: root.voice-notice == "" ? 82px : 100px;
+                background: Theme.surface-1;
+
+                VerticalLayout {
+                    padding-left: 12px;
+                    padding-right: 10px;
+                    padding-top: 9px;
+                    padding-bottom: 9px;
+                    spacing: 7px;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 30px;
+
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: root.voice-notice != "" ? Theme.warning : Theme.success;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 1px;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: root.voice-summary;
+                                color: root.voice-notice != "" ? Theme.warning : Theme.success;
+                                font-size: 12.5px;
+                                font-weight: 650;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: root.voice-channel;
+                                color: Theme.text-faint;
+                                font-size: 11.2px;
+                                overflow: elide;
+                            }
+                        }
+
+                        IconButton {
+                            icon: Icons.log-out;
+                            tooltip: "Disconnect";
+                            colour: Theme.danger;
+                            active-colour: Theme.danger;
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.leave-voice(); }
+                        }
+                    }
+
+                    // The four controls, evenly divided — `grid-cols-4` in
+                    // the web client's voice panel.
+                    HorizontalLayout {
+                        spacing: 6px;
+                        height: 30px;
+
+                        VoiceControl {
+                            icon: root.voice-muted ? Icons.mic-off : Icons.mic;
+                            danger: root.voice-muted;
+                            enabled: root.voice-can-speak;
+                            clicked => { root.toggle-mute(); }
+                        }
+                        VoiceControl {
+                            icon: root.voice-deafened ? Icons.headphones-off : Icons.headphones;
+                            danger: root.voice-deafened;
+                            clicked => { root.toggle-deafen(); }
+                        }
+                        VoiceControl {
+                            icon: Icons.screen-share;
+                            active: root.voice-screen-sharing;
+                            enabled: root.voice-can-screen-share;
+                            clicked => { root.toggle-screen-share(); }
+                        }
+                        VoiceControl {
+                            icon: Icons.settings;
+                            clicked => { root.open-settings(); }
+                        }
+                    }
+
+                    if root.voice-notice != "": Text {
+                        text: root.voice-notice;
+                        color: Theme.text-faint;
+                        font-size: 10.8px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            // --- connection banner ---------------------------------------
+            if root.connection != "ready": Rectangle {
+                height: 34px;
+                background: Theme.surface-1;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    spacing: 8px;
+                    alignment: start;
+                    Icon {
+                        data: Icons.wifi-off;
+                        size: 14px;
+                        colour: Theme.warning;
+                        y: (parent.height - self.height) / 2;
+                    }
+                    Text {
+                        text: root.connection == "connecting" ? "Connecting\u{2026}"
+                            : root.connection == "reconnecting" ? "Reconnecting\u{2026}"
+                            : "Offline";
+                        color: Theme.warning;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Divider {}
+
+            // --- the member's own bar -------------------------------------
+            Rectangle {
+                height: 54px;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 8px;
+                    spacing: 8px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        Rectangle {
+                            background: me-touch.has-hover ? Theme.surface-2 : transparent;
+                            border-radius: Theme.radius-control;
+                            animate background { duration: Theme.normal; }
+                            HorizontalLayout {
+                                padding-left: 6px;
+                                padding-right: 6px;
+                                spacing: 10px;
+                                Avatar {
+                                    size: 32px;
+                                    picture: root.my-avatar;
+                                    fallback: root.my-avatar-fallback;
+                                    initials: root.my-initials;
+                                    presence: root.my-presence;
+                                    name: root.my-name;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 1px;
+                                    Text {
+                                        text: root.my-name;
+                                        color: Theme.text;
+                                        font-size: 13.1px;
+                                        font-weight: 650;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: root.my-status != "" ? root.my-status
+                                            : root.my-presence;
+                                        color: Theme.text-faint;
+                                        font-size: 11.2px;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                        }
+                        me-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.open-profile(); }
+                        }
+                    }
+
+                    if root.can-admin: IconButton {
+                        icon: Icons.dashboard;
+                        tooltip: "Admin panel";
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.open-admin(); }
+                    }
+                    IconButton {
+                        icon: Icons.settings;
+                        tooltip: "Settings";
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.open-settings(); }
+                    }
+                }
+            }
+        }
+    }
+
+    // The sidebar's right edge.
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        background: Theme.border-soft;
+    }
+}

@@ -1,0 +1,100 @@
+[package]
+name = "minichat-native"
+version = "0.6.0"
+edition = "2021"
+description = "MiniChat native desktop client — no browser engine"
+authors = ["MiniChat"]
+rust-version = "1.82"
+default-run = "minichat-native"
+
+[dependencies]
+slint = { version = "~1.18", default-features = false, features = [
+    "compat-1-2",
+    "backend-winit",
+    "renderer-skia",
+    "renderer-software",
+    "std",
+    # Registering the bundled faces at run time. Slint 1.18 exposes the shared
+    # fontique collection only behind this flag; the alternative is pointing
+    # SLINT_FONT_PATH at files on disk, which a single-binary client does not
+    # have. Pinned with `~` so a minor bump cannot silently drop it.
+    "unstable-fontique-011",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+    "multipart",
+    "stream",
+] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = [
+    "connect",
+    "rustls-tls-webpki-roots",
+] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+directories = "5"
+time = { version = "0.3", features = ["formatting", "parsing", "macros", "local-offset"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+ttf-parser = "0.25"
+rustybuzz = "0.20"
+unicode-segmentation = "1"
+percent-encoding = "2"
+url = "2"
+# Slint 1.18 exposes no clipboard API, and "copy message text" is not a
+# feature worth dropping over it.
+arboard = { version = "3", default-features = false }
+# The media half of voice. `default-features = false` to keep native-tls out:
+# the rest of this client is rustls, and one TLS stack is enough.
+livekit = { version = "0.9", optional = true, default-features = false, features = [
+    "tokio",
+    "rustls-tls-native-roots",
+] }
+# Minting room tokens. The instance does that in production — this is here so
+# the media engine can be tested against a real LiveKit server rather than
+# only compiled. Pulled in by the same feature, and by `livekit` regardless.
+livekit-api = { version = "0.7", optional = true, default-features = false, features = [
+    "access-token",
+] }
+# The native file picker for attachments. The XDG portal backend rather than
+# GTK: one fewer system library to depend on, and the portal is what a
+# sandboxed install would have to go through anyway.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+# Desktop notifications. The web client gets these through Web Push and a
+# service worker; a native client talks to the desktop directly, which also
+# means they work with the app closed to the tray rather than only in a tab.
+# `zbus` rather than the default `dbus`: it is pure Rust, so a Linux build
+# needs no libdbus headers. Windows and macOS use their own backends and
+# ignore this.
+notify-rust = { version = "4", default-features = false, features = ["z"] }
+
+[features]
+default = []
+# The media half of voice: `livekit`, and under it roughly 200MB of prebuilt
+# libwebrtc, which needs clang 21 or newer to link. Off by default so that
+# everything else in this client — the whole control plane included — builds,
+# tests and ships without a C++ toolchain. See src/voice.rs.
+voice = ["dep:livekit", "dep:livekit-api"]
+
+# The tray lives on the platforms that ship. Linux would pull in GTK or
+# libayatana-appindicator, which is a system dependency the rest of this
+# client does not have and does not want for one icon.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+tray-icon = "0.19"
+# Push-to-talk has to work while MiniChat is in the background — that is the
+# whole point of it — which an in-app key handler cannot do. Same platforms
+# as the tray, for the same reason: the Linux backend wants X11 or a
+# compositor protocol this client does not otherwise depend on.
+global-hotkey = "0.6"
+
+[build-dependencies]
+slint-build = "1.18"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

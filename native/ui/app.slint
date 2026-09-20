@@ -1,0 +1,906 @@
+// The window.
+//
+// One root component with every screen inside it, switched on `screen`. The
+// Rust side owns all state and pushes it in; nothing here fetches, stores or
+// decides — see `src/app.rs` for the wiring.
+
+import { Theme, Elevation } from "theme.slint";
+import { TitleBar } from "titlebar.slint";
+import { ConnectScreen } from "connect.slint";
+import { Sidebar } from "sidebar.slint";
+import { ChatPane } from "chat.slint";
+import { MemberPanel } from "members.slint";
+import { Inbox } from "inbox.slint";
+import { CallPanel } from "call.slint";
+import { AdminPanel, AdminSection } from "admin.slint";
+import { Button, ButtonKind, TextField, FieldLabel, Avatar } from "controls.slint";
+import { Icon, Icons } from "icons.slint";
+import { SettingsDialog, ProfileDialog, ConfirmDialog, Lightbox, ForwardDialog } from "modals.slint";
+import { SidePanel, ContextMenu, EmojiPicker, SearchHit, EmojiEntry, EmojiRow, MenuItem } from "panels.slint";
+import {
+    MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup, ConversationRow,
+    PendingAttachment, StatTile, StatRow, RoleRow, AdminMemberRow, InviteRow, BanRow, AuditRow
+} from "models.slint";
+
+export {
+    Theme, MessageRow, ChannelRow, CategoryRow, MemberRow, MemberGroup,
+    ConversationRow, SearchHit, EmojiEntry, EmojiRow, MenuItem, PendingAttachment,
+    AdminSection, StatTile, StatRow, RoleRow, AdminMemberRow, InviteRow, BanRow, AuditRow
+}
+
+// Which panel is open beside the chat, if any.
+export enum SidePanelKind { none, search, pins }
+
+// Which dialog covers the app, if any.
+export enum Overlay { none, settings, profile, confirm, emoji, menu, lightbox, forward }
+
+// Which screen the window is showing.
+export enum Screen { connect, signin, chat, admin }
+
+component SignIn {
+    in property <string> instance-name;
+    in property <string> instance-initial;
+    in property <string> headline;
+    in property <string> body;
+    in property <image> instance-icon;
+    in-out property <string> username;
+    in-out property <string> password;
+    in property <string> error;
+    in property <bool> busy;
+    in property <bool> can-register;
+    callback sign-in();
+    callback register();
+    callback back();
+
+    page := Rectangle {
+        background: Theme.bg;
+
+        Rectangle {
+            width: page.width * 1.5;
+            height: self.width;
+            x: (page.width - self.width) / 2;
+            y: -self.height * 0.62;
+            border-radius: self.width / 2;
+            background: @radial-gradient(circle,
+                Theme.accent 0%,
+                Theme.accent.transparentize(0.55) 28%,
+                Theme.accent.transparentize(1.0) 62%);
+            opacity: 0.38;
+        }
+
+        card := Rectangle {
+            width: min(404px, page.width - 48px);
+            height: layout.preferred-height;
+            x: (page.width - self.width) / 2;
+            y: (page.height - self.height) / 2;
+            background: Theme.surface-1;
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            layout := VerticalLayout {
+                padding: 32px;
+
+                HorizontalLayout {
+                    alignment: start;
+                    Rectangle {
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 12px;
+                        background: Theme.accent;
+                        clip: true;
+                        if root.instance-icon.width > 0: Image {
+                            source: root.instance-icon;
+                            width: 100%; height: 100%;
+                            image-fit: cover;
+                        }
+                        if root.instance-icon.width == 0: Text {
+                            text: root.instance-initial;
+                            color: Theme.accent-ink;
+                            font-size: 20px;
+                            font-weight: 700;
+                        }
+                    }
+                }
+
+                Rectangle { height: 22px; }
+
+                Text {
+                    text: root.headline != "" ? root.headline
+                        : "Sign in to " + root.instance-name;
+                    color: Theme.text;
+                    font-size: 21px;
+                    font-weight: 650;
+                    wrap: word-wrap;
+                }
+
+                if root.body != "": Rectangle { height: 8px; }
+                if root.body != "": Text {
+                    text: root.body;
+                    color: Theme.text-muted;
+                    font-size: 13.5px;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { height: 24px; }
+
+                FieldLabel { text: "Username"; }
+                Rectangle { height: 7px; }
+                TextField {
+                    placeholder: "yourname";
+                    text <=> root.username;
+                    enabled: !root.busy;
+                }
+
+                Rectangle { height: 14px; }
+
+                FieldLabel { text: "Password"; }
+                Rectangle { height: 7px; }
+                TextField {
+                    placeholder: "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+                    text <=> root.password;
+                    password: true;
+                    enabled: !root.busy;
+                    error: root.error;
+                    accepted => { root.sign-in(); }
+                }
+
+                Rectangle { height: 20px; }
+
+                Button {
+                    label: root.busy ? "Signing in\u{2026}" : "Sign in";
+                    kind: ButtonKind.primary;
+                    wide: true;
+                    busy: root.busy;
+                    enabled: root.username != "" && root.password != "" && !root.busy;
+                    clicked => { root.sign-in(); }
+                }
+
+                if root.can-register: Rectangle { height: 10px; }
+                if root.can-register: Button {
+                    label: "Create an account";
+                    kind: ButtonKind.ghost;
+                    wide: true;
+                    enabled: !root.busy;
+                    clicked => { root.register(); }
+                }
+
+                Rectangle { height: 16px; }
+
+                Button {
+                    label: "Use a different instance";
+                    kind: ButtonKind.ghost;
+                    wide: true;
+                    enabled: !root.busy;
+                    clicked => { root.back(); }
+                }
+            }
+        }
+    }
+}
+
+export component App inherits Window {
+    title: "MiniChat";
+    background: Theme.bg;
+    default-font-family: Theme.font-sans;
+    default-font-size: 14px;
+    preferred-width: 1180px;
+    preferred-height: 820px;
+    min-width: 420px;
+    min-height: 520px;
+    no-frame: true;
+    // The shortcut scope holds focus until something else takes it, so
+    // Escape and Ctrl+K work before anyone has clicked anything.
+    forward-focus: keys;
+
+    in property <Screen> screen: Screen.connect;
+    in property <bool> maximised: false;
+
+    // --- connect ---------------------------------------------------------
+    in-out property <string> address;
+    in property <string> connect-error;
+    in property <bool> connecting;
+    in property <string> last-instance;
+    callback connect(string);
+
+    // --- sign in ---------------------------------------------------------
+    in-out property <string> username;
+    in-out property <string> password;
+    in property <string> auth-error;
+    in property <bool> authenticating;
+    in property <bool> can-register;
+    in property <string> login-headline;
+    in property <string> login-body;
+    callback sign-in();
+    callback register();
+    callback forget-instance();
+
+    // --- instance --------------------------------------------------------
+    in property <string> instance-name: "MiniChat";
+    in property <string> instance-tagline;
+    in property <string> instance-initial: "M";
+    in property <image> instance-icon;
+
+    // --- chat ------------------------------------------------------------
+    in property <[CategoryRow]> categories;
+    in property <[ChannelRow]> loose-channels;
+    in property <string> selected-channel;
+    in property <string> channel-name;
+    in property <string> channel-topic;
+    in property <string> channel-kind: "text";
+    in property <bool> channel-private;
+    in property <[MessageRow]> messages;
+    in property <bool> loading-messages;
+    in property <[MemberGroup]> member-groups;
+    in property <int> member-count;
+    in property <bool> members-open: true;
+    in property <bool> can-send: true;
+    in property <string> compose-notice;
+    in property <[PendingAttachment]> pending-attachments;
+    in property <string> replying-to;
+    in property <string> typing-line;
+    in-out property <string> draft;
+    in property <string> editing-id;
+    in-out property <string> edit-draft;
+    in property <int> direct-unread;
+    /// Every unread message, across channels and conversations.
+    in property <int> total-unread;
+    in property <bool> inbox-open;
+    in property <[ConversationRow]> conversations;
+    in property <string> selected-conversation;
+    in property <[MessageRow]> direct-messages;
+    in property <string> peer-name;
+    in property <string> peer-presence;
+    in property <image> peer-avatar;
+    in property <color> peer-avatar-fallback;
+    in property <string> peer-initials;
+    in property <[MemberRow]> friend-requests;
+    in property <[MemberRow]> friends;
+    in property <[MemberRow]> blocked-members;
+    in property <int> inbox-tab;
+    callback choose-inbox-tab(int);
+    in property <bool> loading-direct;
+    in-out property <string> direct-draft;
+    in property <bool> voice-enabled;
+
+    callback open-conversation(string);
+    callback send-direct(string);
+    callback close-inbox();
+    callback start-call();
+    in property <string> connection: "ready";
+
+    // --- voice ------------------------------------------------------------
+    in property <bool> voice-live;
+    in property <string> voice-channel;
+    in property <string> voice-summary;
+    in property <bool> voice-muted;
+    in property <bool> voice-deafened;
+    in property <bool> voice-can-speak;
+    in property <bool> voice-can-screen-share;
+    in property <bool> voice-screen-sharing;
+    in property <string> voice-notice;
+
+    // --- direct calls -----------------------------------------------------
+    in property <MemberRow> call-peer;
+    /// "", "ringing", "calling" or "connected".
+    in property <string> call-phase;
+    in property <string> call-duration;
+    in property <string> call-notice;
+    callback accept-call();
+    callback decline-call();
+    callback hang-up();
+
+    callback toggle-mute();
+    callback toggle-deafen();
+    callback toggle-screen-share();
+    callback leave-voice();
+
+    // --- me --------------------------------------------------------------
+    in property <string> my-name;
+    in property <string> my-status;
+    in property <image> my-avatar;
+    in property <color> my-avatar-fallback;
+    in property <string> my-initials;
+    in property <string> my-presence: "online";
+    in property <bool> can-admin;
+    in property <bool> can-invite;
+
+    callback select-channel(string);
+    callback toggle-category(string);
+    callback open-inbox();
+    callback open-settings();
+    callback open-admin();
+    callback open-invites();
+    callback open-profile();
+    callback channel-menu(string);
+    callback category-menu(string);
+    in property <bool> can-reorder;
+    in property <string> dragging-channel;
+    in property <length> drag-offset;
+    callback drag-start(string);
+    callback drag-move(length);
+    callback drag-end();
+    callback send(string);
+    callback cancel-reply();
+    callback remove-attachment(string);
+    callback attach();
+    callback emoji();
+    callback typing();
+    callback toggle-members();
+    callback open-search();
+    callback open-pins();
+    callback react(string, string);
+    callback reply-to(string);
+    callback forward-message(string);
+    callback edit-message(string);
+    callback delete-message(string);
+    callback pin-message(string);
+    callback open-author(string);
+    callback run-activated(string, int);
+    callback open-attachment(string);
+    callback body-width-changed(length);
+    callback message-menu(string);
+    callback save-edit(string);
+    callback cancel-edit();
+    callback step-channel(int);
+    callback focus-changed(bool);
+    callback scrolled(length, length, length);
+    callback open-member(string);
+    callback member-menu(string);
+
+    // --- overlays --------------------------------------------------------
+    in property <Overlay> overlay: Overlay.none;
+    in property <SidePanelKind> side-panel: SidePanelKind.none;
+
+    in-out property <string> status-draft;
+    in property <int> theme-choice;
+    in property <bool> hotkeys-available;
+    in property <bool> hotkeys-enabled;
+    in property <string> hotkey-summary;
+    callback set-hotkeys(bool);
+    in property <string> instance-version;
+    in property <string> my-username;
+
+    in property <MemberRow> profile-member;
+    in property <string> profile-pronouns;
+    in property <string> profile-bio;
+    in property <string> profile-game;
+    in property <string> profile-joined;
+    in property <image> profile-banner;
+    in property <bool> profile-is-me;
+    in property <string> profile-relationship;
+    in property <bool> profile-favourite;
+    callback add-friend(string);
+    callback remove-friend(string);
+    callback block-member(string);
+    callback unblock-member(string);
+    callback toggle-favourite(string);
+
+    in property <string> confirm-title;
+    in property <string> confirm-body;
+    in property <string> confirm-label: "Delete";
+
+    in property <[SearchHit]> panel-hits;
+    in-out property <string> panel-query;
+    in property <bool> panel-loading;
+
+    in property <[EmojiRow]> emoji-custom;
+    in property <[EmojiRow]> emoji-unicode;
+    in-out property <string> emoji-filter;
+
+    // --- lightbox ---------------------------------------------------------
+    in property <image> lightbox-picture;
+    in property <string> lightbox-filename;
+    in property <string> lightbox-caption;
+    callback lightbox-download();
+
+    // --- forwarding -------------------------------------------------------
+    in property <[ChannelRow]> forward-targets;
+    in property <string> forward-target;
+    in property <string> forward-author;
+    in property <string> forward-body;
+    in-out property <string> forward-note;
+    in property <bool> forwarding;
+    callback choose-forward-target(string);
+    callback confirm-forward();
+
+    in property <[MenuItem]> menu-items;
+    in property <length> pointer-x;
+    in property <length> pointer-y;
+
+    callback dismiss-overlay();
+    callback choose-theme(int);
+    callback save-status(string);
+    callback sign-out();
+    callback confirm-action();
+    callback close-panel();
+    callback run-search(string);
+    callback open-hit(string);
+    callback choose-emoji(string);
+    callback menu-chose(string);
+    callback message-member(string);
+
+    // --- administration ---------------------------------------------------
+    in property <[AdminSection]> admin-sections;
+    in property <string> admin-section: "overview";
+    in property <[StatRow]> admin-tiles;
+    in property <[AdminMemberRow]> admin-members;
+    in property <[RoleRow]> admin-roles;
+    in property <[InviteRow]> admin-invites;
+    in property <[BanRow]> admin-bans;
+    in property <[AuditRow]> admin-audit;
+    in property <bool> admin-loading;
+    in property <bool> admin-saving;
+    in property <string> admin-notice;
+    in property <AdminMemberRow> admin-picked;
+    in property <bool> admin-has-picked;
+    in-out property <string> form-name;
+    in-out property <string> form-tagline;
+    in-out property <string> form-accent;
+
+    callback close-admin();
+    callback choose-admin-section(string);
+    callback pick-admin-member(string);
+    callback toggle-role(string, string, bool);
+    callback kick-member(string);
+    callback ban-member(string);
+    callback unban-member(string);
+    callback create-invite();
+    callback revoke-invite(string);
+    callback copy-invite(string);
+    callback save-instance();
+
+    callback minimise();
+    callback toggle-maximise();
+    callback quit();
+
+    // Application shortcuts.
+    //
+    // A key reaches the focused element first — the composer, a field — and
+    // only bubbles here if that element rejects it. That is what lets Ctrl+K
+    // work while typing without the plain letters being swallowed.
+    keys := FocusScope {
+        // Whether the window has focus, so a notification is not raised for
+        // something the member is already looking at.
+        focus-changed-event => { root.focus-changed(self.has-focus); }
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                if (root.overlay != Overlay.none) {
+                    root.dismiss-overlay();
+                    return accept;
+                }
+                if (root.editing-id != "") {
+                    root.cancel-edit();
+                    return accept;
+                }
+                if (root.replying-to != "") {
+                    root.cancel-reply();
+                    return accept;
+                }
+                if (root.side-panel != SidePanelKind.none) {
+                    root.close-panel();
+                    return accept;
+                }
+                return reject;
+            }
+
+            if (root.screen != Screen.chat) {
+                return reject;
+            }
+
+            // Ctrl/Cmd+K opens search, as it does in the web client.
+            if ((event.modifiers.control || event.modifiers.meta) && event.text == "k") {
+                root.open-search();
+                return accept;
+            }
+            // Ctrl/Cmd+F is the same thing; people reach for both.
+            if ((event.modifiers.control || event.modifiers.meta) && event.text == "f") {
+                root.open-search();
+                return accept;
+            }
+            // Ctrl/Cmd+Shift+M mutes, as in the voice panel.
+            if ((event.modifiers.control || event.modifiers.meta)
+                && event.modifiers.shift && event.text == "M") {
+                root.toggle-mute();
+                return accept;
+            }
+            if ((event.modifiers.control || event.modifiers.meta)
+                && event.modifiers.shift && event.text == "D") {
+                root.toggle-deafen();
+                return accept;
+            }
+            // Alt+Up / Alt+Down walk the channel list.
+            if (event.modifiers.alt && event.text == Key.UpArrow) {
+                root.step-channel(-1);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.DownArrow) {
+                root.step-channel(1);
+                return accept;
+            }
+            return reject;
+        }
+
+    VerticalLayout {
+        TitleBar {
+            // The unread total leads, the way a chat client's title does, so
+            // it is readable in a taskbar with the window minimised.
+            title: (root.total-unread > 0 ? "(" + root.total-unread + ")  " : "")
+                + (root.screen == Screen.chat && root.inbox-open
+                    ? root.instance-name + "  \u{2014}  Direct messages"
+                    : root.screen == Screen.chat && root.channel-name != ""
+                        ? root.instance-name + "  \u{2014}  #" + root.channel-name
+                        : root.instance-name);
+            maximised: root.maximised;
+            minimise => { root.minimise(); }
+            toggle-maximise => { root.toggle-maximise(); }
+            close => { root.quit(); }
+        }
+
+        // Each screen sits inside a Rectangle that claims the remaining
+        // height. The stretch has to be on a real element: an `if` is not
+        // one as far as the layout is concerned, so putting it there leaves
+        // the row at its children's preferred height — which for the chat
+        // pane happened to look right and for the inbox collapsed the whole
+        // window to about 300px.
+        screen := Rectangle {
+            vertical-stretch: 1;
+
+        if root.screen == Screen.connect: ConnectScreen {
+            width: screen.width;
+            height: screen.height;
+            address <=> root.address;
+            error: root.connect-error;
+            busy: root.connecting;
+            last-instance: root.last-instance;
+            connect(value) => { root.connect(value); }
+        }
+
+        if root.screen == Screen.signin: SignIn {
+            width: screen.width;
+            height: screen.height;
+            instance-name: root.instance-name;
+            instance-initial: root.instance-initial;
+            instance-icon: root.instance-icon;
+            headline: root.login-headline;
+            body: root.login-body;
+            username <=> root.username;
+            password <=> root.password;
+            error: root.auth-error;
+            busy: root.authenticating;
+            can-register: root.can-register;
+            sign-in => { root.sign-in(); }
+            register => { root.register(); }
+            back => { root.forget-instance(); }
+        }
+
+        if root.screen == Screen.admin: AdminPanel {
+            width: screen.width;
+            height: screen.height;
+            sections: root.admin-sections;
+            section: root.admin-section;
+            instance-name: root.instance-name;
+            tiles: root.admin-tiles;
+            members: root.admin-members;
+            roles: root.admin-roles;
+            invites: root.admin-invites;
+            bans: root.admin-bans;
+            audit: root.admin-audit;
+            loading: root.admin-loading;
+            form-name <=> root.form-name;
+            form-tagline <=> root.form-tagline;
+            form-accent <=> root.form-accent;
+            saving: root.admin-saving;
+            save-notice: root.admin-notice;
+            picked: root.admin-picked;
+            has-picked: root.admin-has-picked;
+            dismissed => { root.close-admin(); }
+            choose-section(id) => { root.choose-admin-section(id); }
+            pick-member(id) => { root.pick-admin-member(id); }
+            toggle-role(user, role, granted) => { root.toggle-role(user, role, granted); }
+            kick(id) => { root.kick-member(id); }
+            ban(id) => { root.ban-member(id); }
+            unban(id) => { root.unban-member(id); }
+            create-invite => { root.create-invite(); }
+            revoke-invite(code) => { root.revoke-invite(code); }
+            copy-invite(url) => { root.copy-invite(url); }
+            save-instance => { root.save-instance(); }
+        }
+
+        if root.screen == Screen.chat: HorizontalLayout {
+            width: screen.width;
+            height: screen.height;
+            spacing: 0px;
+
+            Sidebar {
+                instance-name: root.instance-name;
+                instance-initial: root.instance-initial;
+                instance-tagline: root.instance-tagline;
+                instance-icon: root.instance-icon;
+                categories: root.categories;
+                loose-channels: root.loose-channels;
+                selected-channel: root.selected-channel;
+                inbox-open: root.inbox-open;
+                direct-unread: root.direct-unread;
+                can-invite: root.can-invite;
+                can-admin: root.can-admin;
+                my-name: root.my-name;
+                my-status: root.my-status;
+                my-avatar: root.my-avatar;
+                my-avatar-fallback: root.my-avatar-fallback;
+                my-initials: root.my-initials;
+                my-presence: root.my-presence;
+                connection: root.connection;
+                voice-live: root.voice-live;
+                voice-channel: root.voice-channel;
+                voice-summary: root.voice-summary;
+                voice-muted: root.voice-muted;
+                voice-deafened: root.voice-deafened;
+                voice-can-speak: root.voice-can-speak;
+                voice-can-screen-share: root.voice-can-screen-share;
+                voice-screen-sharing: root.voice-screen-sharing;
+                voice-notice: root.voice-notice;
+                toggle-mute => { root.toggle-mute(); }
+                toggle-deafen => { root.toggle-deafen(); }
+                toggle-screen-share => { root.toggle-screen-share(); }
+                leave-voice => { root.leave-voice(); }
+                open-member(id) => { root.open-member(id); }
+                select-channel(id) => { root.select-channel(id); }
+                toggle-category(id) => { root.toggle-category(id); }
+                open-inbox => { root.open-inbox(); }
+                open-settings => { root.open-settings(); }
+                open-admin => { root.open-admin(); }
+                open-invites => { root.open-invites(); }
+                open-profile => { root.open-profile(); }
+                channel-menu(id) => { root.channel-menu(id); }
+                category-menu(id) => { root.category-menu(id); }
+                can-reorder: root.can-reorder;
+                dragging-channel: root.dragging-channel;
+                drag-offset: root.drag-offset;
+                drag-start(id) => { root.drag-start(id); }
+                drag-move(dy) => { root.drag-move(dy); }
+                drag-end => { root.drag-end(); }
+            }
+
+            if root.inbox-open: Inbox {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                conversations: root.conversations;
+                selected: root.selected-conversation;
+                messages: root.direct-messages;
+                peer-name: root.peer-name;
+                peer-presence: root.peer-presence;
+                peer-avatar: root.peer-avatar;
+                peer-avatar-fallback: root.peer-avatar-fallback;
+                peer-initials: root.peer-initials;
+                requests: root.friend-requests;
+                friends: root.friends;
+                blocked: root.blocked-members;
+                tab: root.inbox-tab;
+                choose-tab(index) => { root.choose-inbox-tab(index); }
+                accept-request(id) => { root.add-friend(id); }
+                decline-request(id) => { root.remove-friend(id); }
+                unblock(id) => { root.unblock-member(id); }
+                message-friend(id) => { root.message-member(id); }
+                loading: root.loading-direct;
+                draft <=> root.direct-draft;
+                voice-enabled: root.voice-enabled;
+                scroll-to-newest: root.scroll-to-newest;
+                open-conversation(id) => { root.open-conversation(id); }
+                send(text) => { root.send-direct(text); }
+                open-peer(id) => { root.open-member(id); }
+                call => { root.start-call(); }
+                back => { root.close-inbox(); }
+                body-width-changed(w) => { root.body-width-changed(w); }
+            }
+
+            if !root.inbox-open: ChatPane {
+                horizontal-stretch: 1;
+                channel-name: root.channel-name;
+                channel-topic: root.channel-topic;
+                channel-kind: root.channel-kind;
+                channel-private: root.channel-private;
+                messages: root.messages;
+                loading: root.loading-messages;
+                members-open: root.members-open;
+                can-send: root.can-send;
+                compose-notice: root.compose-notice;
+                pending-attachments: root.pending-attachments;
+                remove-attachment(id) => { root.remove-attachment(id); }
+                replying-to: root.replying-to;
+                typing-line: root.typing-line;
+                draft <=> root.draft;
+                editing-id: root.editing-id;
+                edit-draft <=> root.edit-draft;
+                save-edit(text) => { root.save-edit(text); }
+                cancel-edit => { root.cancel-edit(); }
+                send(text) => { root.send(text); }
+                cancel-reply => { root.cancel-reply(); }
+                attach => { root.attach(); }
+                emoji => { root.emoji(); }
+                typing => { root.typing(); }
+                toggle-members => { root.toggle-members(); }
+                open-search => { root.open-search(); }
+                open-pins => { root.open-pins(); }
+                react(id, emoji) => { root.react(id, emoji); }
+                reply-to(id) => { root.reply-to(id); }
+                forward-message(id) => { root.forward-message(id); }
+                edit-message(id) => { root.edit-message(id); }
+                delete-message(id) => { root.delete-message(id); }
+                pin-message(id) => { root.pin-message(id); }
+                open-author(id) => { root.open-author(id); }
+                run-activated(target, kind) => { root.run-activated(target, kind); }
+                open-attachment(id) => { root.open-attachment(id); }
+                body-width-changed(w) => { root.body-width-changed(w); }
+                message-menu(id) => { root.message-menu(id); }
+                scrolled(distance, content, viewport) => {
+                    root.scrolled(distance, content, viewport);
+                }
+                scroll-to-newest: root.scroll-to-newest;
+                focus-composer: root.focus-composer;
+                scroll-distance: root.scroll-distance;
+            }
+
+            if root.side-panel != SidePanelKind.none && !root.inbox-open: SidePanel {
+                title: root.side-panel == SidePanelKind.search ? "Search" : "Pinned messages";
+                icon: root.side-panel == SidePanelKind.search ? Icons.search : Icons.pin;
+                searchable: root.side-panel == SidePanelKind.search;
+                query <=> root.panel-query;
+                hits: root.panel-hits;
+                loading: root.panel-loading;
+                empty-text: root.side-panel == SidePanelKind.search
+                    ? "Type to search this community."
+                    : "No messages are pinned in this channel yet.";
+                dismissed => { root.close-panel(); }
+                search(q) => { root.run-search(q); }
+                open-hit(id) => { root.open-hit(id); }
+            }
+
+            if root.members-open && root.side-panel == SidePanelKind.none
+                && !root.inbox-open: MemberPanel {
+                groups: root.member-groups;
+                total: root.member-count;
+                open-member(id) => { root.open-member(id); }
+                member-menu(id) => { root.member-menu(id); }
+            }
+        }
+
+        }
+    }
+    }
+
+    // The call card floats over everything except a dialog, so a ringing
+    // call is visible whatever else is open.
+    if root.call-phase != "": CallPanel {
+        x: root.width - self.width - 24px;
+        y: root.height - self.height - 24px;
+        peer: root.call-peer;
+        phase: root.call-phase;
+        duration: root.call-duration;
+        muted: root.voice-muted;
+        deafened: root.voice-deafened;
+        can-speak: root.voice-can-speak;
+        notice: root.call-notice;
+        accept => { root.accept-call(); }
+        decline => { root.decline-call(); }
+        hang-up => { root.hang-up(); }
+        toggle-mute => { root.toggle-mute(); }
+        toggle-deafen => { root.toggle-deafen(); }
+    }
+
+    // --- overlays, above everything ------------------------------------
+    if root.overlay == Overlay.settings: SettingsDialog {
+        width: root.width;
+        height: root.height;
+        instance-name: root.instance-name;
+        instance-version: root.instance-version;
+        my-name: root.my-name;
+        my-username: root.my-username;
+        my-avatar: root.my-avatar;
+        my-avatar-fallback: root.my-avatar-fallback;
+        my-initials: root.my-initials;
+        status-draft <=> root.status-draft;
+        theme-choice: root.theme-choice;
+        members-open: root.members-open;
+        hotkeys-available: root.hotkeys-available;
+        hotkeys-enabled: root.hotkeys-enabled;
+        hotkey-summary: root.hotkey-summary;
+        set-hotkeys(on) => { root.set-hotkeys(on); }
+        dismissed => { root.dismiss-overlay(); }
+        choose-theme(index) => { root.choose-theme(index); }
+        save-status(text) => { root.save-status(text); }
+        sign-out => { root.sign-out(); }
+        switch-instance => { root.forget-instance(); }
+    }
+
+    if root.overlay == Overlay.profile: ProfileDialog {
+        width: root.width;
+        height: root.height;
+        member: root.profile-member;
+        pronouns: root.profile-pronouns;
+        bio: root.profile-bio;
+        favourite-game: root.profile-game;
+        joined: root.profile-joined;
+        banner: root.profile-banner;
+        is-me: root.profile-is-me;
+        relationship: root.profile-relationship;
+        favourite: root.profile-favourite;
+        dismissed => { root.dismiss-overlay(); }
+        message => { root.message-member(root.profile-member.id); }
+        add-friend => { root.add-friend(root.profile-member.id); }
+        remove-friend => { root.remove-friend(root.profile-member.id); }
+        block => { root.block-member(root.profile-member.id); }
+        unblock => { root.unblock-member(root.profile-member.id); }
+        toggle-favourite => { root.toggle-favourite(root.profile-member.id); }
+    }
+
+    if root.overlay == Overlay.confirm: ConfirmDialog {
+        width: root.width;
+        height: root.height;
+        title: root.confirm-title;
+        body: root.confirm-body;
+        confirm-label: root.confirm-label;
+        dismissed => { root.dismiss-overlay(); }
+        confirmed => { root.confirm-action(); }
+    }
+
+    if root.overlay == Overlay.emoji: EmojiPicker {
+        width: root.width;
+        height: root.height;
+        custom: root.emoji-custom;
+        unicode: root.emoji-unicode;
+        filter <=> root.emoji-filter;
+        anchor-x: root.pointer-x;
+        anchor-y: root.pointer-y;
+        chose(name) => { root.choose-emoji(name); }
+        dismissed => { root.dismiss-overlay(); }
+    }
+
+    if root.overlay == Overlay.lightbox: Lightbox {
+        width: root.width;
+        height: root.height;
+        picture: root.lightbox-picture;
+        filename: root.lightbox-filename;
+        caption: root.lightbox-caption;
+        dismissed => { root.dismiss-overlay(); }
+        download => { root.lightbox-download(); }
+    }
+
+    if root.overlay == Overlay.forward: ForwardDialog {
+        width: root.width;
+        height: root.height;
+        channels: root.forward-targets;
+        selected: root.forward-target;
+        preview-author: root.forward-author;
+        preview-body: root.forward-body;
+        note <=> root.forward-note;
+        busy: root.forwarding;
+        dismissed => { root.dismiss-overlay(); }
+        choose(id) => { root.choose-forward-target(id); }
+        forward => { root.confirm-forward(); }
+    }
+
+    if root.overlay == Overlay.menu: ContextMenu {
+        width: root.width;
+        height: root.height;
+        items: root.menu-items;
+        anchor-x: root.pointer-x;
+        anchor-y: root.pointer-y;
+        chose(id) => { root.menu-chose(id); }
+        dismissed => { root.dismiss-overlay(); }
+    }
+
+    /// Bumped by Rust to jump the message list to the newest message.
+    ///
+    /// Driven from Rust rather than bound to the model because "should this
+    /// scroll" depends on where the reader was before the message arrived,
+    /// which the markup does not know.
+    in property <int> scroll-to-newest;
+
+    /// Bumped to put the caret back in the composer — after a channel
+    /// change, after a dialog closes, and when the window is first shown.
+    in property <int> focus-composer;
+    in property <length> scroll-distance;
+
+}

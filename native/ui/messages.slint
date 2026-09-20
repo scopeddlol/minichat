@@ -1,0 +1,677 @@
+// The message list.
+//
+// A row draws its body from the positioned runs the flow layout produced
+// (`src/text/layout.rs`), so everything here is placement and decoration —
+// no text measurement happens in the UI thread.
+
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+import { Avatar, IconButton, Divider } from "controls.slint";
+import { MessageRow, MessageRun, MessageDecoration, ReactionChip, AttachmentRow } from "models.slint";
+
+// The gutter the avatar occupies; grouped messages indent past it so their
+// text lines up with the text above.
+export global Metrics {
+    out property <length> gutter: 36px;
+    out property <length> gutter-gap: 14px;
+    out property <length> body-x: root.gutter + root.gutter-gap;
+    out property <length> side-padding: 32px;
+}
+
+component Decoration inherits Rectangle {
+    in property <MessageDecoration> spec;
+    in property <bool> revealed: false;
+
+    x: root.spec.x;
+    y: root.spec.y;
+    width: root.spec.width;
+    height: root.spec.height;
+
+    background:
+        root.spec.kind == 0 ? Theme.surface-0        // fenced code panel
+        : root.spec.kind == 1 ? Theme.surface-3      // inline code chip
+        : root.spec.kind == 2 ? Theme.surface-3      // quote bar
+        : root.spec.kind == 3 ? Theme.accent-soft    // mention
+        : root.spec.kind == 4 ? Theme.warning.transparentize(0.78) // mention of me
+        : root.revealed ? Theme.surface-2 : Theme.surface-3;       // spoiler
+
+    border-radius:
+        root.spec.kind == 0 ? Theme.radius-control
+        : root.spec.kind == 2 ? 0
+        : 5px;
+
+    // `.md pre` has a border; the other decorations do not.
+    border-width: root.spec.kind == 0 ? 1px : 0;
+    border-color: Theme.border;
+}
+
+component BodyRun inherits Rectangle {
+    in property <MessageRun> run;
+    in property <bool> revealed: false;
+    in property <bool> jumbo: false;
+    callback activated(string, int);
+
+    x: root.run.x;
+    y: root.run.y;
+    width: root.run.width;
+    height: root.run.height;
+
+    // A custom emoji is drawn rather than written.
+    if root.run.kind == 4: Image {
+        source: root.run.picture;
+        width: 100%;
+        height: 100%;
+        image-fit: contain;
+    }
+
+    if root.run.kind != 4: Text {
+        text: root.run.text;
+        // A hair wider than measured, so sub-pixel rounding between the
+        // shaper and the renderer cannot clip a final glyph.
+        width: parent.width + 1px;
+        height: 100%;
+        vertical-alignment: center;
+        font-family: root.run.code ? Theme.font-mono : Theme.font-sans;
+        font-size: root.jumbo ? 34px : root.run.size;
+        font-weight: root.run.bold ? 700
+            : (root.run.kind == 2 || root.run.kind == 3) ? 560 : 400;
+        font-italic: root.run.italic;
+        color:
+            // A spoiler hides its text by painting it the same colour as the
+            // block over it, rather than by removing it — so it is still
+            // selectable and still the right width once revealed.
+            root.run.spoiler && !root.revealed ? Theme.surface-3
+            : root.run.kind == 1 ? Theme.accent
+            : root.run.kind == 2 ? Theme.accent
+            : root.run.kind == 3 ? Theme.warning
+            : root.run.code ? Theme.text
+            : Theme.text;
+        // Slint has no text-decoration, so the rules are drawn below.
+    }
+
+    // `.md a` underlines on hover; strike-through is always on when set.
+    if root.run.kind == 1 && touch.has-hover: Rectangle {
+        y: parent.height - 5px;
+        height: 1px;
+        background: Theme.accent;
+    }
+    if root.run.underline: Rectangle {
+        y: parent.height - 5px;
+        height: 1px;
+        background: Theme.text;
+    }
+    if root.run.strike: Rectangle {
+        y: parent.height / 2;
+        height: 1px;
+        background: Theme.text;
+    }
+
+    touch := TouchArea {
+        // Only the interactive kinds react; plain text keeps the I-beam so
+        // the row still reads as text rather than as a button.
+        enabled: root.run.kind == 1 || root.run.kind == 2 || root.run.kind == 3
+            || root.run.spoiler;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.activated(root.run.target, root.run.kind); }
+    }
+}
+
+component Reaction {
+    in property <ReactionChip> chip;
+    callback toggled();
+
+    width: body.preferred-width + 18px;
+    height: 26px;
+
+    Rectangle {
+        background: root.chip.me ? Theme.accent-soft
+            : touch.has-hover ? Theme.surface-3 : Theme.surface-2;
+        border-radius: 13px;
+        border-width: 1px;
+        border-color: root.chip.me ? Theme.accent : transparent;
+        animate background { duration: Theme.normal; }
+
+        body := HorizontalLayout {
+            spacing: 5px;
+            alignment: center;
+
+            if root.chip.picture.width > 0: Image {
+                source: root.chip.picture;
+                width: 17px;
+                height: 17px;
+                image-fit: contain;
+                y: (parent.height - self.height) / 2;
+            }
+            if root.chip.picture.width == 0: Text {
+                text: root.chip.emoji;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.chip.count;
+                color: root.chip.me ? Theme.accent : Theme.text-muted;
+                font-size: 12px;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.toggled(); }
+    }
+}
+
+component Attachment {
+    in property <AttachmentRow> file;
+    callback opened();
+
+    height: root.file.kind == "image" && root.file.picture.width > 0
+        ? root.file.preview-height : 58px;
+
+    // An image attachment shows itself; anything else gets a file card.
+    if root.file.kind == "image" && root.file.picture.width > 0: Rectangle {
+        width: root.file.preview-width;
+        height: root.file.preview-height;
+        x: 0;
+        border-radius: Theme.radius-control;
+        clip: true;
+        Image {
+            source: root.file.picture;
+            width: 100%;
+            height: 100%;
+            image-fit: cover;
+        }
+    }
+
+    if root.file.kind != "image" || root.file.picture.width == 0: Rectangle {
+        width: min(420px, parent.width);
+        x: 0;
+        background: Theme.surface-1;
+        border-radius: Theme.radius-control;
+        border-width: 1px;
+        border-color: Theme.border;
+
+        HorizontalLayout {
+            padding: 12px;
+            spacing: 12px;
+
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 8px;
+                background: Theme.surface-3;
+                Icon {
+                    data: root.file.kind == "image" ? Icons.image
+                        : root.file.kind == "video" ? Icons.video
+                        : root.file.kind == "audio" ? Icons.volume
+                        : Icons.download;
+                    size: 17px;
+                    colour: Theme.text-muted;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: root.file.filename;
+                    color: Theme.text;
+                    font-size: 13px;
+                    font-weight: 560;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.file.size;
+                    color: Theme.text-faint;
+                    font-size: 11.5px;
+                }
+            }
+
+            IconButton {
+                icon: Icons.download;
+                tooltip: "Open";
+                y: (parent.height - self.height) / 2;
+                clicked => { root.opened(); }
+            }
+        }
+    }
+}
+
+export component MessageItem {
+    in property <MessageRow> message;
+    in property <bool> revealed-spoilers: false;
+    /// The message being edited in place, if it is this one.
+    in property <string> editing-id;
+    in-out property <string> edit-draft;
+    property <bool> editing: root.editing-id != "" && root.editing-id == root.message.id;
+    callback react(string, string);
+    callback reply();
+    callback forward();
+    callback edit();
+    callback remove();
+    callback pin();
+    callback open-author(string);
+    callback run-activated(string, int);
+    callback open-attachment(string);
+    callback context-menu();
+    callback save-edit(string);
+    callback cancel-edit();
+
+    property <length> reactions-h: root.message.reactions.length > 0 ? 32px : 0;
+    property <length> attachments-h: root.message.attachments.length > 0
+        ? 8px + root.message.attachments-height : 0;
+    property <length> header-h: root.message.grouped ? 0px : 22px;
+    property <length> reply-h: root.message.reply-author != "" ? 22px : 0px;
+    property <length> divider-h: root.message.day-divider != "" ? 44px : 0px;
+    property <length> editing-h: root.editing ? 34px : 0px;
+    property <length> marker-h: root.message.unread-marker ? 20px : 0px;
+
+    height: root.divider-h + root.marker-h
+        + (root.message.system ? 34px
+            : root.reply-h + root.header-h + root.message.body-height + root.editing-h
+                + root.reactions-h + root.attachments-h
+                + (root.message.grouped ? 4px : 10px));
+
+    VerticalLayout {
+    // --- day divider -------------------------------------------------
+    if root.message.day-divider != "": Rectangle {
+        height: root.divider-h;
+        HorizontalLayout {
+            padding-left: Metrics.side-padding;
+            padding-right: Metrics.side-padding;
+            spacing: 14px;
+            Rectangle {
+                height: 1px;
+                y: (parent.height - self.height) / 2;
+                background: Theme.border-soft;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: root.message.day-divider;
+                color: Theme.text-faint;
+                font-size: 11.5px;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                height: 1px;
+                y: (parent.height - self.height) / 2;
+                background: Theme.border-soft;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+
+    // --- new-messages marker -------------------------------------------
+    if root.message.unread-marker: Rectangle {
+        height: root.marker-h;
+        HorizontalLayout {
+            padding-left: Metrics.side-padding;
+            padding-right: Metrics.side-padding;
+            spacing: 10px;
+            Rectangle {
+                height: 1px;
+                y: (parent.height - self.height) / 2;
+                background: Theme.danger;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: "NEW";
+                color: Theme.danger;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.8px;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // --- the message itself ---------------------------------------------
+    body := Rectangle {
+        height: root.height - root.divider-h - root.marker-h;
+        background: hover.has-hover ? Theme.surface-0.transparentize(0.35) : transparent;
+
+        // A system notice is one quiet line, not a message.
+        // A system notice is one quiet line with a dot where the avatar
+        // would be, matching the web client's join notice.
+        if root.message.system: HorizontalLayout {
+            padding-left: Metrics.side-padding;
+            padding-right: Metrics.side-padding;
+            spacing: 0px;
+            alignment: start;
+
+            Rectangle {
+                width: Metrics.body-x;
+                Rectangle {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: Theme.success;
+                }
+            }
+            Text {
+                text: root.message.system-text;
+                color: Theme.text-muted;
+                font-size: 13px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Rectangle { width: 10px; }
+            Text {
+                text: root.message.timestamp;
+                color: Theme.text-faint;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+
+        if !root.message.system: Rectangle {
+            x: Metrics.side-padding;
+            width: parent.width - Metrics.side-padding * 2;
+
+            // Reply preview, above the author line.
+            if root.message.reply-author != "": HorizontalLayout {
+                y: 4px;
+                height: 18px;
+                spacing: 6px;
+                alignment: start;
+                Rectangle { width: Metrics.body-x - 22px; }
+                Icon {
+                    data: Icons.reply;
+                    size: 13px;
+                    colour: Theme.text-faint;
+                    y: (parent.height - self.height) / 2;
+                }
+                Text {
+                    text: root.message.reply-author;
+                    color: Theme.text-muted;
+                    font-size: 12px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.message.reply-excerpt;
+                    color: Theme.text-faint;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            // Avatar, on the first message of a group only.
+            if !root.message.grouped: Rectangle {
+                x: 0;
+                y: root.reply-h + 5px;
+                width: Metrics.gutter;
+                height: Metrics.gutter;
+                Avatar {
+                    size: Metrics.gutter;
+                    picture: root.message.avatar;
+                    fallback: root.message.avatar-fallback;
+                    initials: root.message.initials;
+                    name: root.message.author-name;
+                }
+                TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.open-author(root.message.author-id); }
+                }
+            }
+
+            // On a grouped message the timestamp appears in the gutter on
+            // hover, which is where the avatar would have been.
+            if root.message.grouped && hover.has-hover: Text {
+                x: 0;
+                y: 4px;
+                width: Metrics.gutter;
+                text: root.message.timestamp;
+                color: Theme.text-faint;
+                font-size: 10px;
+                horizontal-alignment: right;
+                overflow: elide;
+            }
+
+            // Author line.
+            if !root.message.grouped: HorizontalLayout {
+                x: Metrics.body-x;
+                y: root.reply-h + 2px;
+                height: 20px;
+                spacing: 8px;
+                alignment: start;
+
+                Text {
+                    text: root.message.author-name;
+                    color: root.message.author-colour;
+                    font-size: 14.2px;
+                    font-weight: 650;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.message.timestamp;
+                    color: Theme.text-faint;
+                    font-size: 11.2px;
+                    vertical-alignment: center;
+                }
+                if root.message.pinned: Icon {
+                    data: Icons.pin;
+                    size: 12px;
+                    colour: Theme.text-faint;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+
+            // The body: decorations first, then the runs on top. While it
+            // is being edited the whole thing is replaced by a field, which
+            // is why the height below is the editor's when editing.
+            if root.editing: Rectangle {
+                x: Metrics.body-x;
+                y: root.reply-h + root.header-h + 2px;
+                width: parent.width - Metrics.body-x;
+                height: root.message.body-height + 34px;
+
+                VerticalLayout {
+                    spacing: 6px;
+
+                    Rectangle {
+                        height: max(38px, editor.preferred-height + 18px);
+                        background: Theme.surface-0;
+                        border-radius: Theme.radius-control;
+                        border-width: 1px;
+                        border-color: Theme.accent;
+
+                        HorizontalLayout {
+                            padding-left: 11px;
+                            padding-right: 11px;
+                            editor := TextInput {
+                                text <=> root.edit-draft;
+                                color: Theme.text;
+                                font-size: 14px;
+                                font-family: Theme.font-sans;
+                                wrap: word-wrap;
+                                single-line: false;
+                                vertical-alignment: center;
+
+                                key-pressed(event) => {
+                                    // Enter saves, Shift+Enter adds a line.
+                                    // Intercepted rather than left to
+                                    // `accepted`, which Slint only raises on
+                                    // a single-line input.
+                                    if (event.text == Key.Return && !event.modifiers.shift) {
+                                        root.save-edit(self.text);
+                                        return accept;
+                                    }
+                                    // Escape abandons the edit, which is what
+                                    // a member who opened it by mistake will
+                                    // reach for.
+                                    if (event.text == Key.Escape) {
+                                        root.cancel-edit();
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        height: 16px;
+                        Text {
+                            text: "Enter to save";
+                            color: Theme.text-faint;
+                            font-size: 11px;
+                        }
+                        Text {
+                            text: "\u{00b7}";
+                            color: Theme.text-faint;
+                            font-size: 11px;
+                        }
+                        Text {
+                            text: "Escape to cancel";
+                            color: Theme.text-faint;
+                            font-size: 11px;
+                        }
+                    }
+                }
+            }
+
+            if !root.editing: Rectangle {
+                x: Metrics.body-x;
+                y: root.reply-h + root.header-h + 2px;
+                width: parent.width - Metrics.body-x;
+                height: root.message.body-height;
+
+                for spec in root.message.decorations: Decoration {
+                    spec: spec;
+                    revealed: root.revealed-spoilers;
+                }
+                for run in root.message.runs: BodyRun {
+                    run: run;
+                    jumbo: root.message.jumbo;
+                    revealed: root.revealed-spoilers;
+                    activated(target, kind) => { root.run-activated(target, kind); }
+                }
+
+                if root.message.edited: Text {
+                    // Sits after the last line rather than inline, which is
+                    // close enough to the web client's trailing "(edited)"
+                    // and needs no extra measurement pass.
+                    x: 0;
+                    y: root.message.body-height - 4px;
+                    text: "(edited)";
+                    color: Theme.text-faint;
+                    font-size: 10.5px;
+                }
+            }
+
+            // Attachments.
+            if root.message.attachments.length > 0: VerticalLayout {
+                x: Metrics.body-x;
+                y: root.reply-h + root.header-h + root.message.body-height + 8px;
+                width: parent.width - Metrics.body-x;
+                spacing: 8px;
+                for file in root.message.attachments: Attachment {
+                    file: file;
+                    opened => { root.open-attachment(file.id); }
+                }
+            }
+
+            // Reactions.
+            if root.message.reactions.length > 0: HorizontalLayout {
+                x: Metrics.body-x;
+                y: root.reply-h + root.header-h + root.message.body-height
+                    + root.attachments-h + 4px;
+                height: 26px;
+                spacing: 6px;
+                alignment: start;
+                for chip in root.message.reactions: Reaction {
+                    chip: chip;
+                    toggled => { root.react(root.message.id, chip.emoji); }
+                }
+            }
+
+            // A failed send explains itself rather than silently vanishing.
+            if root.message.failed: HorizontalLayout {
+                x: Metrics.body-x;
+                y: root.reply-h + root.header-h + root.message.body-height;
+                height: 18px;
+                spacing: 5px;
+                alignment: start;
+                Icon {
+                    data: Icons.alert;
+                    size: 12px;
+                    colour: Theme.danger;
+                    y: (parent.height - self.height) / 2;
+                }
+                Text {
+                    text: "Could not send \u{2014} click to retry";
+                    color: Theme.danger;
+                    font-size: 11.5px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // A message still in flight is dimmed.
+        opacity: root.message.pending ? 0.55 : 1.0;
+
+        // --- hover actions ----------------------------------------------
+        if hover.has-hover && !root.message.system && !root.editing: Rectangle {
+            x: parent.width - self.width - Metrics.side-padding;
+            y: -12px;
+            width: actions.preferred-width + 8px;
+            height: 32px;
+            background: Theme.surface-1;
+            border-radius: Theme.radius-control;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            actions := HorizontalLayout {
+                padding: 3px;
+                spacing: 1px;
+                IconButton {
+                    icon: Icons.smile; tooltip: "React"; size: 26px; glyph: 15px;
+                    clicked => { root.react(root.message.id, ""); }
+                }
+                IconButton {
+                    icon: Icons.reply; tooltip: "Reply"; size: 26px; glyph: 15px;
+                    clicked => { root.reply(); }
+                }
+                IconButton {
+                    icon: Icons.forward; tooltip: "Forward"; size: 26px; glyph: 15px;
+                    clicked => { root.forward(); }
+                }
+                IconButton {
+                    icon: Icons.pin;
+                    tooltip: root.message.pinned ? "Unpin" : "Pin";
+                    size: 26px; glyph: 15px;
+                    clicked => { root.pin(); }
+                }
+                IconButton {
+                    icon: Icons.pencil; tooltip: "Edit"; size: 26px; glyph: 15px;
+                    clicked => { root.edit(); }
+                }
+                IconButton {
+                    icon: Icons.trash; tooltip: "Delete"; size: 26px; glyph: 15px;
+                    colour: Theme.danger;
+                    active-colour: Theme.danger;
+                    clicked => { root.remove(); }
+                }
+            }
+        }
+
+        hover := TouchArea {
+            mouse-cursor: MouseCursor.default;
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.right
+                    && event.kind == PointerEventKind.down) {
+                    root.context-menu();
+                }
+            }
+        }
+    }
+    }
+}

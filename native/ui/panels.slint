@@ -1,0 +1,379 @@
+// Panels that slide in beside the chat rather than covering it: search,
+// pinned messages, the emoji picker and the right-click menus.
+
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+import { Avatar, Divider, IconButton, TextField, NavLabel } from "controls.slint";
+import { MessageRow, ReactionChip } from "models.slint";
+
+export struct SearchHit {
+    id: string,
+    channel: string,
+    author: string,
+    excerpt: string,
+    timestamp: string,
+    avatar: image,
+    avatar-fallback: color,
+    initials: string,
+}
+
+export struct EmojiEntry {
+    name: string,
+    // Empty for a unicode emoji, set for a custom one.
+    url: string,
+    picture: image,
+    glyph: string,
+}
+
+// One row of the picker's grid.
+//
+// Slint has no wrapping layout, so the grid is chunked into rows on the Rust
+// side — the same reason message bodies arrive as positioned runs.
+export struct EmojiRow {
+    entries: [EmojiEntry],
+}
+
+// A right-click menu. `.context-menu` in the web client: 244px wide, placed
+// at the pointer and clamped to the window.
+export struct MenuItem {
+    id: string,
+    label: string,
+    icon: string,
+    danger: bool,
+    separator-before: bool,
+}
+
+export component ContextMenu {
+    in property <[MenuItem]> items;
+    in property <length> anchor-x;
+    in property <length> anchor-y;
+    callback chose(string);
+    callback dismissed();
+
+    // A full-window catcher, so a click anywhere else closes the menu.
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.dismissed(); }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right
+                && event.kind == PointerEventKind.down) {
+                root.dismissed();
+            }
+        }
+    }
+
+    menu := Rectangle {
+        width: 244px;
+        height: list.preferred-height + 10px;
+        // Clamped so the menu never opens off-screen.
+        x: min(root.anchor-x, root.width - self.width - 8px);
+        y: min(root.anchor-y, root.height - self.height - 8px);
+        background: Theme.surface-1;
+        border-radius: 9px;
+        border-width: 1px;
+        border-color: Theme.border;
+
+        TouchArea {}
+
+        list := VerticalLayout {
+            padding: 5px;
+            spacing: 1px;
+
+            for item in root.items: VerticalLayout {
+                spacing: 1px;
+                if item.separator-before: Rectangle {
+                    height: 7px;
+                    Rectangle {
+                        height: 1px;
+                        y: 3px;
+                        background: Theme.border-soft;
+                    }
+                }
+                Rectangle {
+                    height: 34px;
+                    background: entry.has-hover ? Theme.surface-3 : transparent;
+                    border-radius: Theme.radius-small;
+                    animate background { duration: Theme.fast; }
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 10px;
+                        if item.icon != "": Icon {
+                            data: item.icon;
+                            size: 15px;
+                            colour: item.danger ? Theme.danger : Theme.text-muted;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        Text {
+                            text: item.label;
+                            color: item.danger ? Theme.danger : Theme.text;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    entry := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => { root.chose(item.id); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The emoji picker, opened from the composer or a message's react button.
+export component EmojiPicker {
+    in property <[EmojiRow]> custom;
+    in property <[EmojiRow]> unicode;
+    in-out property <string> filter;
+    in property <length> anchor-x;
+    in property <length> anchor-y;
+    callback chose(string);
+    callback dismissed();
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.dismissed(); }
+    }
+
+    Rectangle {
+        width: 328px;
+        height: 380px;
+        x: min(max(8px, root.anchor-x - self.width / 2), root.width - self.width - 8px);
+        y: max(8px, min(root.anchor-y - self.height, root.height - self.height - 8px));
+        background: Theme.surface-1;
+        border-radius: Theme.radius-card;
+        border-width: 1px;
+        border-color: Theme.border;
+        clip: true;
+
+        TouchArea {}
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 10px;
+
+            TextField {
+                placeholder: "Search emoji";
+                text <=> root.filter;
+            }
+
+            Flickable {
+                content-height: grid.preferred-height;
+                grid := VerticalLayout {
+                    alignment: start;
+                    spacing: 8px;
+
+                    if root.custom.length > 0: NavLabel { text: "THIS COMMUNITY"; }
+                    for row in root.custom: HorizontalLayout {
+                        alignment: start;
+                        spacing: 2px;
+                        height: 36px;
+                        for entry in row.entries: Rectangle {
+                            width: 36px;
+                            height: 36px;
+                            background: hover-custom.has-hover ? Theme.surface-3 : transparent;
+                            border-radius: Theme.radius-small;
+                            Image {
+                                source: entry.picture;
+                                width: 24px;
+                                height: 24px;
+                                image-fit: contain;
+                            }
+                            hover-custom := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => { root.chose(entry.name); }
+                            }
+                        }
+                    }
+
+                    if root.unicode.length > 0: NavLabel { text: "EMOJI"; }
+                    for row in root.unicode: HorizontalLayout {
+                        alignment: start;
+                        spacing: 2px;
+                        height: 36px;
+                        for entry in row.entries: Rectangle {
+                            width: 36px;
+                            height: 36px;
+                            background: hover-unicode.has-hover ? Theme.surface-3 : transparent;
+                            border-radius: Theme.radius-small;
+                            Text {
+                                text: entry.glyph;
+                                font-size: 21px;
+                            }
+                            hover-unicode := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => { root.chose(entry.glyph); }
+                            }
+                        }
+                    }
+
+                    if root.custom.length == 0 && root.unicode.length == 0: Text {
+                        text: "No emoji match that.";
+                        color: Theme.text-faint;
+                        font-size: 12.5px;
+                        height: 40px;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Search and pins share a shape: a titled column beside the chat.
+export component SidePanel {
+    in property <string> title;
+    in property <string> icon;
+    in property <bool> searchable;
+    in-out property <string> query;
+    in property <[SearchHit]> hits;
+    in property <bool> loading;
+    in property <string> empty-text: "Nothing here yet.";
+    callback dismissed();
+    callback search(string);
+    callback open-hit(string);
+
+    width: 340px;
+
+    Rectangle {
+        background: Theme.surface-0;
+
+        VerticalLayout {
+            Rectangle {
+                height: 56px;
+                HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 10px;
+                    spacing: 9px;
+                    Icon {
+                        data: root.icon;
+                        size: 16px;
+                        colour: Theme.text-faint;
+                        y: (parent.height - self.height) / 2;
+                    }
+                    Text {
+                        text: root.title;
+                        color: Theme.text;
+                        font-size: 13.5px;
+                        font-weight: 650;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: Icons.close;
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.dismissed(); }
+                    }
+                }
+            }
+            Divider {}
+
+            if root.searchable: Rectangle {
+                height: 58px;
+                HorizontalLayout {
+                    padding: 12px;
+                    TextField {
+                        placeholder: "Search this community";
+                        text <=> root.query;
+                        accepted(value) => { root.search(value); }
+                    }
+                }
+            }
+
+            if root.loading: Text {
+                text: "Searching\u{2026}";
+                color: Theme.text-faint;
+                font-size: 12.5px;
+                horizontal-alignment: center;
+                height: 40px;
+                vertical-alignment: center;
+            }
+
+            if !root.loading && root.hits.length == 0: Text {
+                text: root.empty-text;
+                color: Theme.text-faint;
+                font-size: 12.5px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+                height: 60px;
+                vertical-alignment: center;
+            }
+
+            Flickable {
+                content-height: results.preferred-height;
+                results := VerticalLayout {
+                    alignment: start;
+                    padding: 8px;
+                    spacing: 2px;
+
+                    for hit in root.hits: Rectangle {
+                        height: 72px;
+                        background: row.has-hover ? Theme.surface-2 : transparent;
+                        border-radius: Theme.radius-control;
+                        animate background { duration: Theme.normal; }
+
+                        HorizontalLayout {
+                            padding: 10px;
+                            spacing: 10px;
+                            Avatar {
+                                size: 28px;
+                                picture: hit.avatar;
+                                fallback: hit.avatar-fallback;
+                                initials: hit.initials;
+                                name: hit.author;
+                            }
+                            VerticalLayout {
+                                spacing: 2px;
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    Text {
+                                        text: hit.author;
+                                        color: Theme.text;
+                                        font-size: 12.8px;
+                                        font-weight: 650;
+                                    }
+                                    Text {
+                                        text: hit.timestamp;
+                                        color: Theme.text-faint;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Text {
+                                    text: hit.excerpt;
+                                    color: Theme.text-muted;
+                                    font-size: 12.2px;
+                                    wrap: word-wrap;
+                                    overflow: elide;
+                                }
+                                if hit.channel != "": Text {
+                                    text: "#" + hit.channel;
+                                    color: Theme.text-faint;
+                                    font-size: 11px;
+                                }
+                            }
+                        }
+
+                        row := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.open-hit(hit.id); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        width: 1px;
+        background: Theme.border-soft;
+    }
+}
