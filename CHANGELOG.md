@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.1
+
+- Fixed the native client panicking on every launch that had a saved instance to open. A `state.borrow()` in the scrutinee of an `if let` outlived its block, so the `borrow_mut()` inside could never succeed. Present since the lightbox work; nothing caught it because nothing ran the client with a saved instance.
+- Fixed sign-in reporting the wrong reason. Every 401 became "Sign in again. Your session was rejected.", including the one the server sends for a wrong password — which is the only 401 anyone meets while trying to start a session. The server's own "Incorrect username or password." is kept now, as the web client has always kept it. A 401 during an established session still signs out.
+- A `--signin` mode runs the whole client headlessly and drives the real screen, so `tests/live.sh` can check that a correct password reaches the app and that a wrong one says which. The existing `--live` tests went around the screen entirely, which is why neither bug above was caught.
+- **The release ships installers rather than archives**, and the native client alone:
+
+  ```
+  MiniChat-0.6.1-x86_64-setup.exe    per-user, no administrator, Start Menu
+                                     entry, uninstaller, /S and /INSTANCE=
+  minichat-native_0.6.1_amd64.deb    on PATH and in the menu
+  MiniChat-0.6.1-x86_64.AppImage     everywhere else, no root
+  ```
+
+  CI installs each one, runs the client from where the package put it, and uninstalls again. The `.deb`'s dependencies are the detected link-time set plus the libraries winit, FemtoVG and libwebrtc open by name at run time — `dpkg-shlibdeps` cannot see a `dlopen`, so a package built from its answer alone installs cleanly and then opens no window.
+- **The Tauri shell is no longer released.** It moves to `tauri.yml`, which builds it and publishes nothing.
+
+### Deployment
+
+The Windows `.msi` and `.exe` from 0.6.0 are not superseded by an update — the native installer is a separate application and does not upgrade them. Camera and screen share remain unimplemented in the native client.
+
+Images: `ghcr.io/scopeddlol/minichat:v0.6.1` for Linux amd64 and arm64.
+
 ## 0.6.0
 
 - A Chromium-free native client in `native/`, written in Rust with Slint and no browser engine. It covers channels, messages, direct messages, voice, search, administration, friends, forwarding, the image lightbox, notifications and global voice hotkeys. It holds about 30 MB idle where the WebView2 shell holds several hundred, and runs as a single binary with no runtime installed beside it. This replaces the WPF preview started in 0.5.0, which is gone: LiveKit has no C# client SDK, and the screen-capture code already existed in Rust.

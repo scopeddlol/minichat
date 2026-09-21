@@ -4,7 +4,7 @@
 ; client on twenty machines should not have to talk twenty people through
 ; typing it:
 ;
-;   MiniChat-0.6.0-x86_64-setup.exe /S /INSTANCE=https://chat.example.com
+;   MiniChat-0.6.1-x86_64-setup.exe /S /INSTANCE=https://chat.example.com
 ;
 ; The address is written only when there are no settings already, so a
 ; reinstall never overrides what someone chose, and the client re-validates

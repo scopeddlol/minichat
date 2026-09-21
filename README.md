@@ -59,15 +59,15 @@ requests certificates.
 
 ```bash
 mkdir minichat && cd minichat
-curl -fLO https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/compose.yml
-curl -fLO https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/Caddyfile
-curl -fLO https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/livekit.yaml
-curl -fLo .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.0/.env.example
+curl -fLO https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.1/compose.yml
+curl -fLO https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.1/Caddyfile
+curl -fLO https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.1/livekit.yaml
+curl -fLo .env https://raw.githubusercontent.com/scopeddlol/minichat/v0.6.1/.env.example
 ```
 
 These four files configure the stack; the application image is prebuilt,
 so there is nothing to compile and no repository to clone. Set
-`MINICHAT_TAG=v0.6.0` in `.env` to pin this release.
+`MINICHAT_TAG=v0.6.1` in `.env` to pin this release.
 
 Open `.env` and set your two domains, then generate the secrets:
 
@@ -121,7 +121,7 @@ release instead, so upgrading is something you choose rather than something a
 restart does to you:
 
 ```bash
-MINICHAT_TAG=v0.6.0
+MINICHAT_TAG=v0.6.1
 ```
 
 ### Build from source instead
@@ -409,11 +409,11 @@ registry.
 ### Publishing a release
 
 ```bash
-git tag v0.6.0
-git push origin v0.6.0
+git tag v0.6.1
+git push origin v0.6.1
 ```
 
-That publishes the image as `ghcr.io/scopeddlol/minichat:v0.6.0` (and `:0.6`)
+That publishes the image as `ghcr.io/scopeddlol/minichat:v0.6.1` (and `:0.6`)
 and opens a **draft** GitHub release with the Windows installers and the native
 client for Windows and Linux attached, for you to review before making it
 public.

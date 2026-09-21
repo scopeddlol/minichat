@@ -7,12 +7,12 @@
 ;
 ; Built from CI, and locally with:
 ;
-;   makensis -DVERSION=0.6.0 -DBINARY=../../target/release/minichat-native.exe \
+;   makensis -DVERSION=0.6.1 -DBINARY=../../target/release/minichat-native.exe \
 ;            -DOUTFILE=MiniChat-Setup.exe installer.nsi
 ;
 ; Silent install is supported, with the instance address as an option:
 ;
-;   MiniChat-0.6.0-x86_64-setup.exe /S /INSTANCE=https://chat.example.com
+;   MiniChat-0.6.1-x86_64-setup.exe /S /INSTANCE=https://chat.example.com
 
 Unicode true
 ManifestDPIAware true

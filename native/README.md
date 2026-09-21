@@ -52,10 +52,10 @@ Built from `native/packaging/`:
 
 ```bash
 # Linux: a .deb and an AppImage, from a release binary
-native/packaging/linux.sh target/release/minichat-native 0.6.0 dist
+native/packaging/linux.sh target/release/minichat-native 0.6.1 dist
 
 # Windows: the NSIS setup
-makensis -DVERSION=0.6.0 -DBINARY=../../target/release/minichat-native.exe \
+makensis -DVERSION=0.6.1 -DBINARY=../../target/release/minichat-native.exe \
          -DOUTFILE=MiniChat-Setup.exe native/packaging/windows/installer.nsi
 ```
 
