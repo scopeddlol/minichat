@@ -26,6 +26,42 @@ reason this client exists in the language it does:
   process loopback) are written, working and reusable here. A C# client throws
   them away and reimplements process-loopback audio through P/Invoke.
 
+## Installing it
+
+A release carries three packages, and nothing else — this client is what
+MiniChat ships now.
+
+| | |
+|---|---|
+| **Windows** | `MiniChat-*-x86_64-setup.exe`. Installs for one user into `%LOCALAPPDATA%`, so it needs no administrator. Start Menu entry, an uninstaller in Add/Remove Programs, and `/S` for a silent install. |
+| **Debian, Ubuntu** | `minichat-native_*_amd64.deb`. `sudo apt install ./minichat-native_*.deb` puts it on `PATH` and in the menu; `sudo apt remove minichat` takes it away. |
+| **Any other Linux** | `MiniChat-*-x86_64.AppImage`. Mark it executable and run it. Nothing to install, no root. |
+
+Everyone on one instance types the same address, so the Windows installer
+takes it on the command line and writes it where the client looks:
+
+```bat
+MiniChat-x86_64-setup.exe /S /INSTANCE=https://chat.example.com
+```
+
+It only writes the address when there are no settings already, so a
+reinstall never overrides what someone chose, and the client re-validates
+whatever it reads.
+
+Built from `native/packaging/`:
+
+```bash
+# Linux: a .deb and an AppImage, from a release binary
+native/packaging/linux.sh target/release/minichat-native 0.6.0 dist
+
+# Windows: the NSIS setup
+makensis -DVERSION=0.6.0 -DBINARY=../../target/release/minichat-native.exe \
+         -DOUTFILE=MiniChat-Setup.exe native/packaging/windows/installer.nsi
+```
+
+CI installs every package it builds, runs the client from where the package
+put it, and uninstalls again. An installer nobody installs is a guess.
+
 ## Running it
 
 ```bash
@@ -47,6 +83,9 @@ cargo run -- --screenshot shot.png 1180 820 --accent '#e8734a' --tint '#2a1810'
 # Any dialog, over demo data.
 cargo run -- --screenshot shot.png 1180 820 --overlay settings
 # settings | profile | emoji | menu | confirm | search
+
+# Drive the real sign-in screen against a real server, without a display.
+cargo run -- --signin https://chat.example.com yourname yourpassword
 ```
 
 The screenshot path renders through Slint's software renderer rather than
@@ -150,7 +189,12 @@ Two kinds of check exist because unit tests cannot see two kinds of bug:
   Slint only raises that callback on a single-line input.
 - `tests/live.sh` starts a real server, sets an instance up, seeds it, and has
   the client sign in, read the gateway and render. Every other test would pass
-  against a server that changed the shape of READY.
+  against a server that changed the shape of READY. It also drives the real
+  sign-in screen — `--signin`, which runs the whole client headlessly — and
+  checks both what a correct password does and what a wrong one says. That
+  gap is where a sign-in that answered every refusal with "your session was
+  rejected" lived, along with a panic on every launch that had an instance to
+  open.
 - `tests/voice.sh` starts a real LiveKit server, joins it with the media
   engine, and watches from a second participant in the room: the microphone
   track is published, subscribed by someone else, muted, and the participant

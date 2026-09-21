@@ -88,4 +88,32 @@ grep -qE '#general      [0-9]+ messages' <<< "$REPORT" || fail "no messages were
 SIZE=$(stat -c%s "$OUT")
 [ "$SIZE" -gt 20000 ] || fail "the render looks empty ($SIZE bytes)"
 
-echo "OK — signed in, gateway READY, ${SIZE} byte render"
+# Everything above drives the API client. This drives the client: the real
+# sign-in screen, its button, the task behind it and the event that comes
+# back. The gap between the two is where a sign-in that reported "your
+# session was rejected" for a wrong password lived, and where a panic on
+# every launch that had an instance to open lived with it.
+#
+# XDG_CONFIG_HOME so the check writes its session somewhere disposable
+# instead of over whatever is on the machine running it.
+echo "signing in through the sign-in screen"
+CONFIG="$WORK/config"
+SCREEN=$(XDG_CONFIG_HOME="$CONFIG" "$CLIENT" --signin "$ORIGIN" ada correcthorsebattery)
+echo "$SCREEN"
+grep -q 'signed in to Lovelace Works as Ada Lovelace' <<< "$SCREEN" \
+  || fail "the sign-in screen did not reach the app"
+
+# And that a refusal says which refusal it was. The server distinguishes a
+# wrong password from an expired session; so must the screen.
+echo "checking what a wrong password says"
+# `if !` rather than `&& fail`: the client is expected to exit non-zero
+# here, and `set -e` would take that as the script's own failure.
+if REFUSED=$(XDG_CONFIG_HOME="$WORK/config-bad" "$CLIENT" \
+    --signin "$ORIGIN" ada notmypassword 2>&1); then
+  fail "a wrong password signed in"
+fi
+echo "$REFUSED"
+grep -q 'Incorrect username or password' <<< "$REFUSED" \
+  || fail "a wrong password did not say so: $REFUSED"
+
+echo "OK — signed in, gateway READY, ${SIZE} byte render, sign-in screen checked"

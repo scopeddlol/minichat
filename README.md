@@ -5,7 +5,7 @@
 **Voice, video and text chat for one community — on your own server.**
 
 Discord's channels and voice rooms, Slack's calm. Self-hosted with Docker,
-installable as a mobile PWA and a Windows desktop app.
+installable as a mobile PWA and a desktop app for Windows and Linux.
 
 </div>
 
@@ -173,36 +173,30 @@ because it carries libwebrtc and wants clang 21 to link; everything else builds
 without a C++ toolchain. The released binaries are built with that feature on,
 so they carry audio. Camera and screen share are not implemented here yet.
 
-From v0.6.0 the release carries this client for both Windows and Linux:
+**This is what MiniChat ships.** A release carries it and nothing else:
 
 ```
-minichat-native-<version>-x86_64-windows.zip
-minichat-native-<version>-x86_64-linux.tar.gz
+MiniChat-<version>-x86_64-setup.exe      Windows, per-user, no administrator
+minichat-native_<version>_amd64.deb      Debian and Ubuntu
+MiniChat-<version>-x86_64.AppImage       every other Linux
 ```
 
-Unpack and run it — there is no installer and nothing to install beside it. On
-Linux the binary needs fontconfig and the xkbcommon and xcb libraries, which a
-desktop system already has.
+`.github/workflows/release.yml` builds all three on a `v*` tag, installs each
+one, runs the client from where the package put it, uninstalls again, and then
+opens a draft release. An installer that nobody installs is a guess.
+`native/README.md` has the details, including how to build the packages
+locally and how to hand out an installer that already knows your instance
+address.
 
-On **Windows this is a preview**, and the Tauri installer below remains the
-released build until the native one has been through accessibility testing
-there. On **Linux it is the only client**, because Tauri was never built for it.
+### The Tauri shell
 
-### Windows desktop app
+A window with the web client inside it, built with Tauri. **It is no longer
+released.** The native client above is what MiniChat ships; this remains in
+the tree as the desktop wrapper around the web interface, and
+`.github/workflows/tauri.yml` keeps it building so it does not rot. Nothing
+it produces is attached to a release.
 
-A native window built with Tauri. Tag a release and GitHub Actions builds the
-installers for you:
-
-```bash
-git tag v0.1.0 && git push --tags
-```
-
-`.github/workflows/desktop.yml` produces an `.msi` and an `.exe`, builds the
-native client above for Windows and Linux, and attaches all four to the
-release. It also runs on any change under `desktop/`, where it
-installs what it just built, checks it, and uninstalls again — the bundle
-configuration is only exercised when an installer is actually made, and a
-release is a bad moment to discover it cannot be. To build locally on Windows:
+To build it locally on Windows:
 
 ```bash
 cd desktop
@@ -211,29 +205,9 @@ npm run build
 ```
 
 On first launch the app asks for your instance address and remembers it.
-Right-click the tray icon → **Switch instance…** changes it later.
-
-#### Deploying it to a community
-
-Everyone on one instance types the same address, so the `.exe` setup takes it
-on the command line and writes it where the app looks:
-
-```bat
-MiniChat_0.6.0_x64-setup.exe /S /INSTANCE=https://chat.example.com
-```
-
-`/S` is NSIS's silent flag; drop it to watch the installer run. Quotes around
-the address are optional. The address is
-only written when there are no settings already — a reinstall never overrides
-what someone chose — and the app re-validates it on startup, so a bad value
-costs a trip to the connect screen and nothing more. The installer is per-user
-and needs no administrator.
-
-The installer's artwork lives in `desktop/icons/installer-*.bmp`, at the sizes
-NSIS and WiX demand, and is generated from the app icon by
-`desktop/icons/installer-art.py` so that the two cannot drift apart. What the
-installer *does* beyond copying files is `desktop/installer/hooks.nsh`, which
-is exactly the paragraph above and nothing else.
+Right-click the tray icon → **Switch instance…** changes it later. Its
+installer takes the same `/S /INSTANCE=https://chat.example.com` the native
+one does.
 
 If the connect screen says it can't reach the app's internals, the build was
 made without `withGlobalTauri` enabled in `desktop/tauri.conf.json` — the
@@ -422,7 +396,8 @@ source, `git pull` and add `-f compose.build.yml --build` as above.
 |---|---|---|
 | `ci.yml` | every push and PR | `cargo fmt`, Clippy with warnings denied, release build, `tsc`, web build |
 | `docker.yml` | pushes, PRs, `v*` tags | Builds the image for amd64 and arm64, smoke-tests each one, publishes to GHCR |
-| `desktop.yml` | `v*` tags, manual | Builds the Windows installers and attaches them to a draft release |
+| `release.yml` | `v*` tags, `native/**` changes, manual | Builds the native client's Windows installer, `.deb` and AppImage, installs and uninstalls each one, and attaches them to a draft release |
+| `tauri.yml` | `desktop/**` changes | Checks the Tauri shell still builds. Publishes nothing |
 
 `docker.yml` builds each architecture on a runner of that architecture rather
 than under emulation, then merges the two into one manifest — an emulated arm64
